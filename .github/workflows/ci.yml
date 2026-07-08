@@ -11,7 +11,7 @@ env:
 
 jobs:
   build-test:
-    name: Build, lint & unit/differential tests
+    name: Build, lint & unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
       - name: Format check
         run: forge fmt --check
 
-      - name: Unit + differential tests
+      - name: Unit tests
         run: forge test --no-match-path "test/fork/*" -vvv
 
       - name: Coverage
