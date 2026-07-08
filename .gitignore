@@ -2,7 +2,4 @@ cache/
 out/
 .env
 lcov.info
-
-# Local working docs (mini-specs, notes) stay untracked — the versioned spec and
-# verdicts live in blockful/nexus-harness (production repo carries code only).
 docs/
