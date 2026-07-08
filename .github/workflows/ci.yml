@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FOUNDRY_PROFILE: default
+
+jobs:
+  build-test:
+    name: Build, lint & unit/differential tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build
+        run: forge build --sizes
+
+      - name: Format check
+        run: forge fmt --check
+
+      - name: Unit + differential tests
+        run: forge test --no-match-path "test/fork/*" -vvv
+
+      - name: Coverage
+        run: forge coverage --no-match-path "test/fork/*" --report summary --report lcov
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov
+          path: lcov.info
+
+  fork-tests:
+    name: Mainnet-fork parity & gas bench
+    runs-on: ubuntu-latest
+    # Uses the MAINNET_RPC_URL secret when configured; otherwise the suite's public
+    # archive fallback. Kept out of build-test so RPC flakiness never blocks unit CI.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Fork parity + gas bench
+        env:
+          MAINNET_RPC_URL: ${{ secrets.MAINNET_RPC_URL }}
+        run: forge test --match-path "test/fork/*" -vv
+
+  slither:
+    name: Slither static analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: crytic/slither-action@v0.4.1
+        with:
+          target: .
+          slither-config: slither.config.json
+          fail-on: medium
