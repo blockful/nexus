@@ -7,7 +7,8 @@ This repo starts from a **stock OZ v5.6.1 governor scaffold with fork-proven par
 against the live ENS governor**, and grows the Nexus mechanisms milestone by milestone
 under a risk-calibrated clean-room method. The exploratory draft
 ([`governor-nexus`](https://github.com/blockful/governor-nexus)) is vendored as a
-pinned reference (`lib/governor-nexus` @ `87d659b`) and is compared against — never
+pinned reference (`lib/governor-nexus-draft`, vendored from commit `87d659b` — see its
+`PROVENANCE.md`) and is compared against — never
 copied from — via the differential harness.
 
 The frozen spec, method, parameters, and open decisions live in

@@ -13,7 +13,7 @@ import {StandardRuleset} from "draft/rulesets/StandardRuleset.sol";
 import {IBondRulesetVector, INexus, IOptimisticRulesetVector, IStandardRulesetVector} from "../ISystemUnderTest.sol";
 import {VectorsFixture} from "../VectorsFixture.sol";
 
-/// @dev Binds the vectors to the DRAFT implementation (lib/governor-nexus, pinned at
+/// @dev Binds the vectors to the DRAFT implementation (lib/governor-nexus-draft, pinned at
 ///      the v0.1 reference commit). Deployment and wiring replicate the draft repo's
 ///      own NexusFixture exactly. The production binding lands with milestone 1+ and
 ///      overrides the same hook.
