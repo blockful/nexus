@@ -75,3 +75,19 @@ jobs:
           target: .
           slither-config: slither.config.json
           fail-on: medium
+
+  aderyn:
+    name: Aderyn static analysis
+    runs-on: ubuntu-latest
+    # Complements Slither: fast, low-false-positive second opinion.
+    # Scope (src/ only) comes from aderyn.toml, mirroring slither.config.json.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: Cyfrin/aderyn-ci@v0.0.10
+        with:
+          fail-on: high
