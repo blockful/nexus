@@ -8,7 +8,7 @@ import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
 
 /// @dev Mintable ERC20Votes stand-in for the ENS token (block-number clock, like ENS).
 ///      Only for the offline unit suite — the fork suites use the real deployed token.
-contract MockVotesToken is ERC20, ERC20Permit, ERC20Votes {
+contract MockENSToken is ERC20, ERC20Permit, ERC20Votes {
     constructor() ERC20("Mock ENS", "mENS") ERC20Permit("Mock ENS") {}
 
     function mint(address to, uint256 amount) external {

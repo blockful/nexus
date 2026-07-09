@@ -10,7 +10,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ENSGovernor} from "../src/ENSGovernor.sol";
 import {ENSParams} from "../src/ENSParams.sol";
 import {Box} from "./mocks/Box.sol";
-import {MockVotesToken} from "./mocks/MockVotesToken.sol";
+import {MockENSToken} from "./mocks/MockENSToken.sol";
 
 /// @dev Unit suite for the stock scaffold, configured with the live ENS parameters.
 ///      Exercises the full lifecycle against a mock token + fresh timelock; the fork
@@ -18,7 +18,7 @@ import {MockVotesToken} from "./mocks/MockVotesToken.sol";
 contract ENSGovernorTest is Test {
     uint256 internal constant TIMELOCK_DELAY = 2 days;
 
-    MockVotesToken internal token;
+    MockENSToken internal token;
     TimelockController internal timelock;
     ENSGovernor internal governor;
     Box internal box;
@@ -30,7 +30,7 @@ contract ENSGovernorTest is Test {
         vm.roll(1000);
         vm.warp(1_700_000_000);
 
-        token = new MockVotesToken();
+        token = new MockENSToken();
         timelock = new TimelockController(TIMELOCK_DELAY, new address[](0), new address[](0), address(this));
         governor = new ENSGovernor(
             IVotes(address(token)),
