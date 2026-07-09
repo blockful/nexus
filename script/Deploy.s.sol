@@ -10,9 +10,9 @@ import {ENSGovernor} from "../src/ENSGovernor.sol";
 import {ENSParams} from "../src/ENSParams.sol";
 
 /// @notice Deploys the stock scaffold wired to the real ENS token and timelock with the
-///         live governor's current parameters. Milestone-0 baseline only — the governor
-///         gets no timelock roles here; migration is a DAO proposal granting PROPOSER +
-///         EXECUTOR (the live timelock is OZ v4.3: CANCELLER_ROLE does not exist there).
+///         live governor's current parameters. The governor gets no timelock roles here; 
+///         migration is a DAO proposal granting PROPOSER + EXECUTOR (the live timelock 
+///         is OZ v4.3: CANCELLER_ROLE does not exist there).
 contract Deploy is Script {
     function run() external returns (ENSGovernor governor) {
         vm.startBroadcast();
