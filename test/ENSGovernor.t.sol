@@ -9,7 +9,8 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {ENSGovernor} from "../src/ENSGovernor.sol";
 import {ENSParams} from "../src/ENSParams.sol";
-import {Box, MockVotesToken} from "./utils/TestUtils.sol";
+import {Box} from "./mocks/Box.sol";
+import {MockVotesToken} from "./mocks/MockVotesToken.sol";
 
 /// @dev Unit suite for the stock scaffold, configured with the live ENS parameters.
 ///      Exercises the full lifecycle against a mock token + fresh timelock; the fork

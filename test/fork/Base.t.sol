@@ -8,7 +8,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {ENSGovernor} from "../../src/ENSGovernor.sol";
 import {ENSParams} from "../../src/ENSParams.sol";
-import {Box} from "../utils/TestUtils.sol";
+import {Box} from "../mocks/Box.sol";
 import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet fork with the LIVE ENS governor and the stock v5 scaffold wired to the

@@ -7,6 +7,7 @@ import {ERC20Votes} from "@openzeppelin/contracts/token/ERC20/extensions/ERC20Vo
 import {Nonces} from "@openzeppelin/contracts/utils/Nonces.sol";
 
 /// @dev Mintable ERC20Votes stand-in for the ENS token (block-number clock, like ENS).
+///      Only for the offline unit suite — the fork suites use the real deployed token.
 contract MockVotesToken is ERC20, ERC20Permit, ERC20Votes {
     constructor() ERC20("Mock ENS", "mENS") ERC20Permit("Mock ENS") {}
 
@@ -20,20 +21,5 @@ contract MockVotesToken is ERC20, ERC20Permit, ERC20Votes {
 
     function nonces(address owner) public view override(ERC20Permit, Nonces) returns (uint256) {
         return super.nonces(owner);
-    }
-}
-
-/// @dev Simple governance target owned by the timelock.
-contract Box {
-    address public immutable owner;
-    uint256 public value;
-
-    constructor(address owner_) {
-        owner = owner_;
-    }
-
-    function setValue(uint256 value_) external {
-        require(msg.sender == owner, "not owner");
-        value = value_;
     }
 }
