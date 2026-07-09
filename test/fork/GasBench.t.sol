@@ -12,9 +12,9 @@ import {IGov} from "./IGov.sol";
 ///      benchmark (governor-nexus @ leo/gas-bench-and-notes) so numbers are comparable
 ///      across the three implementations: live v4, stock v5 scaffold, Nexus draft.
 ///
-///      Run: forge test --match-contract GasBenchFork -vv
+///      Run: forge test --match-contract GasBench -vv
 ///      (override the RPC with MAINNET_RPC_URL if the default is rate-limited)
-contract GasBenchForkTest is BaseTest {
+contract GasBenchTest is BaseTest {
     // prepared in setUp (separate tx) so measured calls start from realistic cold state
     uint256 internal liveVoteId;
     uint256 internal scaffoldVoteId;

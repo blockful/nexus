@@ -12,7 +12,7 @@ import {IGov} from "./IGov.sol";
 ///      propose → vote → queue → execute lifecycle. Divergences that are inherent to
 ///      the OZ v4 → v5 upgrade are pinned in the Divergences contract below so they
 ///      stay documented and intentional.
-contract ForkParityTest is BaseTest {
+contract ParityTest is BaseTest {
     // ─────────────────────────── Configuration ───────────────────────────
 
     function test_parity_configuration() public view {
@@ -137,7 +137,7 @@ contract ForkParityTest is BaseTest {
 
 /// @dev Divergences inherent to OZ v4 → v5. Each one is asserted, not just noted:
 ///      if an upgrade ever makes these converge (or drift further), the suite flags it.
-contract ForkParityDivergencesTest is BaseTest {
+contract ParityDivergencesTest is BaseTest {
     /// v4 expresses 1% as 100/10000, v5 as 1/100 — the effective quorum is identical
     /// (asserted in test_parity_quorum); only the raw numerator/denominator differ.
     function test_divergence_quorumFractionEncoding() public view {
