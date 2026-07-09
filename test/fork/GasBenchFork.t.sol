@@ -3,7 +3,8 @@ pragma solidity ^0.8.30;
 
 import {console2} from "forge-std/Test.sol";
 
-import {Box, ForkFixture, IGov} from "./ForkFixture.sol";
+import {Box, ForkFixture} from "./ForkFixture.sol";
+import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet-fork A/B gas benchmark: the LIVE ENS governor (real deployed bytecode,
 ///      real token checkpoint history) vs the stock v5 scaffold on the same fork, wired

@@ -4,7 +4,8 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {ENSParams} from "../../src/ENSParams.sol";
-import {Box, ForkFixture, IGov} from "./ForkFixture.sol";
+import {Box, ForkFixture} from "./ForkFixture.sol";
+import {IGov} from "./IGov.sol";
 
 /// @dev Behavioral parity: the stock v5 scaffold must be observationally equivalent to
 ///      the live ENS governor for configuration, proposal identity, and the full

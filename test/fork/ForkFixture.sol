@@ -9,55 +9,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ENSGovernor} from "../../src/ENSGovernor.sol";
 import {ENSParams} from "../../src/ENSParams.sol";
 import {Box} from "../utils/TestUtils.sol";
-
-/// @dev Minimal surface shared by the live ENS governor (OZ v4-era) and the v5 scaffold.
-interface IGov {
-    function propose(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        string memory description
-    ) external returns (uint256);
-    function castVote(uint256 proposalId, uint8 support) external returns (uint256);
-    function queue(address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash)
-        external
-        returns (uint256);
-    function execute(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) external payable returns (uint256);
-    function cancel(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) external returns (uint256);
-    function hashProposal(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) external pure returns (uint256);
-    function state(uint256 proposalId) external view returns (uint8);
-    function proposalSnapshot(uint256 proposalId) external view returns (uint256);
-    function proposalDeadline(uint256 proposalId) external view returns (uint256);
-    function proposalEta(uint256 proposalId) external view returns (uint256);
-    function hasVoted(uint256 proposalId, address account) external view returns (bool);
-    function getVotes(address account, uint256 timepoint) external view returns (uint256);
-    function name() external view returns (string memory);
-    function votingDelay() external view returns (uint256);
-    function votingPeriod() external view returns (uint256);
-    function proposalThreshold() external view returns (uint256);
-    function quorum(uint256 timepoint) external view returns (uint256);
-    function quorumNumerator() external view returns (uint256);
-    function quorumDenominator() external view returns (uint256);
-    // solhint-disable-next-line func-name-mixedcase
-    function COUNTING_MODE() external view returns (string memory);
-    function token() external view returns (address);
-    function timelock() external view returns (address);
-}
+import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet fork with the LIVE ENS governor and the stock v5 scaffold wired to the
 ///      REAL ENS token and REAL ENS timelock, both configured identically. The same
