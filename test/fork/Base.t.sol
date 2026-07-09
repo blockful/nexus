@@ -14,7 +14,7 @@ import {IGov} from "./IGov.sol";
 /// @dev Mainnet fork with the LIVE ENS governor and the stock v5 scaffold wired to the
 ///      REAL ENS token and REAL ENS timelock, both configured identically. The same
 ///      whale delegate (nick.eth) drives every operation on both sides.
-abstract contract ForkFixture is Test {
+abstract contract BaseTest is Test {
     address internal constant WHALE = 0xb8c2C29ee19D8307cb7255e1Cd9CbDE883A267d5; // nick.eth, ~3.26M votes
     uint256 internal constant FORK_BLOCK = 25_445_220;
 
@@ -55,6 +55,8 @@ abstract contract ForkFixture is Test {
         scaffoldBox = new Box(ENSParams.TIMELOCK);
     }
 
+    /// @dev Builds the standard single-action payload — `box.setValue(newValue)` — as the
+    ///      (targets, values, calldatas) trio every governor entrypoint expects.
     function _actions(Box box, uint256 newValue)
         internal
         pure
@@ -67,6 +69,9 @@ abstract contract ForkFixture is Test {
         c[0] = abi.encodeCall(Box.setValue, (newValue));
     }
 
+    /// @dev Proposes `box.setValue(newValue)` on the given governor as the whale. Routing
+    ///      both sides through this one helper keeps the A/B payloads identical by
+    ///      construction — the only differences are the ones the test declares.
     function _propose(IGov gov, Box box, uint256 newValue, string memory desc) internal returns (uint256 id) {
         (address[] memory t, uint256[] memory v, bytes[] memory c) = _actions(box, newValue);
         vm.prank(WHALE);

@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {ENSParams} from "../../src/ENSParams.sol";
-import {Box, ForkFixture} from "./ForkFixture.sol";
+import {Box, BaseTest} from "./Base.t.sol";
 import {IGov} from "./IGov.sol";
 
 /// @dev Behavioral parity: the stock v5 scaffold must be observationally equivalent to
@@ -12,7 +12,7 @@ import {IGov} from "./IGov.sol";
 ///      propose → vote → queue → execute lifecycle. Divergences that are inherent to
 ///      the OZ v4 → v5 upgrade are pinned in the Divergences contract below so they
 ///      stay documented and intentional.
-contract ForkParityTest is ForkFixture {
+contract ForkParityTest is BaseTest {
     // ─────────────────────────── Configuration ───────────────────────────
 
     function test_parity_configuration() public view {
@@ -137,7 +137,7 @@ contract ForkParityTest is ForkFixture {
 
 /// @dev Divergences inherent to OZ v4 → v5. Each one is asserted, not just noted:
 ///      if an upgrade ever makes these converge (or drift further), the suite flags it.
-contract ForkParityDivergencesTest is ForkFixture {
+contract ForkParityDivergencesTest is BaseTest {
     /// v4 expresses 1% as 100/10000, v5 as 1/100 — the effective quorum is identical
     /// (asserted in test_parity_quorum); only the raw numerator/denominator differ.
     function test_divergence_quorumFractionEncoding() public view {

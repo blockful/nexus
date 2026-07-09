@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {console2} from "forge-std/Test.sol";
 
-import {Box, ForkFixture} from "./ForkFixture.sol";
+import {Box, BaseTest} from "./Base.t.sol";
 import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet-fork A/B gas benchmark: the LIVE ENS governor (real deployed bytecode,
@@ -14,7 +14,7 @@ import {IGov} from "./IGov.sol";
 ///
 ///      Run: forge test --match-contract GasBenchFork -vv
 ///      (override the RPC with MAINNET_RPC_URL if the default is rate-limited)
-contract GasBenchForkTest is ForkFixture {
+contract GasBenchForkTest is BaseTest {
     // prepared in setUp (separate tx) so measured calls start from realistic cold state
     uint256 internal liveVoteId;
     uint256 internal scaffoldVoteId;
