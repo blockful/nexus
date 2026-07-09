@@ -8,9 +8,8 @@ import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet-fork A/B gas benchmark: the LIVE ENS governor (real deployed bytecode,
 ///      real token checkpoint history) vs the stock v5 scaffold on the same fork, wired
-///      to the REAL ENS token and REAL ENS timelock. Same structure as the draft repo's
-///      benchmark (governor-nexus @ leo/gas-bench-and-notes) so numbers are comparable
-///      across the three implementations: live v4, stock v5 scaffold, Nexus draft.
+///      to the REAL ENS token and REAL ENS timelock. Both sides run identical payloads
+///      through the same helpers, so the numbers are directly comparable.
 ///
 ///      Run: forge test --match-contract GasBench -vv
 ///      (override the RPC with MAINNET_RPC_URL if the default is rate-limited)
