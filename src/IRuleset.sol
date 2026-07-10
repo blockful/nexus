@@ -24,6 +24,9 @@ interface IRuleset is IERC165 {
     function voteSucceeded(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `voter` has already cast a vote on `proposalId` under this ruleset.
+    /// @dev MUST NOT revert on unknown proposal ids: implementations answer from their own
+    ///      tally storage, so a `proposalId` this ruleset never counted reads as `false`
+    ///      (empty-tally default), never as an error.
     function hasVoted(uint256 proposalId, address voter) external view returns (bool);
 
     /// Tooling/view support only — never used for outcome logic (that is `quorumReached`).

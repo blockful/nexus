@@ -122,6 +122,8 @@ contract StandardRuleset is IRuleset {
     }
 
     /// @inheritdoc IRuleset
+    /// @dev A `proposalId` this ruleset never counted returns `false` (empty-tally mapping
+    ///      default) rather than reverting.
     function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
         return _proposalVotes[proposalId].hasVoted[voter];
     }
