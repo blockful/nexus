@@ -6,21 +6,25 @@ import {Test} from "forge-std/Test.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {ENSGovernor} from "../../src/ENSGovernor.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {StandardRuleset} from "../../src/StandardRuleset.sol";
 import {ENSParams} from "../../src/ENSParams.sol";
 import {Box} from "../mocks/Box.sol";
 import {IGov} from "./IGov.sol";
 
-/// @dev Mainnet fork with the LIVE ENS governor and the stock v5 scaffold wired to the
-///      REAL ENS token and REAL ENS timelock, both configured identically. The same
-///      whale delegate (nick.eth) drives every operation on both sides.
+/// @dev Mainnet fork with the LIVE ENS governor and a locally-deployed GovernorNexus
+///      scaffold (type 0 = StandardRuleset, ENS params) wired to the REAL ENS token and
+///      REAL ENS timelock, both configured identically. Type 0 is designed to be
+///      observationally indistinguishable from the live v4 governor. The same whale
+///      delegate (nick.eth) drives every operation on both sides.
 abstract contract BaseTest is Test {
     address internal constant WHALE = 0xb8c2C29ee19D8307cb7255e1Cd9CbDE883A267d5; // nick.eth, ~3.26M votes
     uint256 internal constant FORK_BLOCK = 25_445_220;
 
     IGov internal liveGov = IGov(ENSParams.GOVERNOR);
     TimelockController internal timelock = TimelockController(ENSParams.TIMELOCK);
-    ENSGovernor internal scaffold;
+    GovernorNexus internal scaffold;
+    StandardRuleset internal standardRuleset;
     IGov internal scaffoldGov;
 
     Box internal liveBox;
@@ -31,14 +35,26 @@ abstract contract BaseTest is Test {
         // token nowadays); override with MAINNET_RPC_URL for a dedicated key.
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://eth.drpc.org")), FORK_BLOCK);
 
-        scaffold = new ENSGovernor(
+        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // quorumReached reads governor.proposalSnapshot, so the ruleset must be constructed
+        // with the governor's address — but the governor constructor needs the ruleset. Break
+        // the cycle by precomputing the governor's CREATE address (this deployer's next nonce
+        // + 1, since the ruleset deploys first) and asserting the prediction held.
+        address predictedGovernor = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        standardRuleset = new StandardRuleset(predictedGovernor, IVotes(ENSParams.TOKEN), ENSParams.QUORUM_NUMERATOR);
+
+        // Name "ENS Governor" so `name()` and the EIP-712 vote-by-sig domain match the live
+        // governor (D11). Type 0 = StandardRuleset with the live ENS params.
+        scaffold = new GovernorNexus(
+            "ENS Governor",
             IVotes(ENSParams.TOKEN),
             timelock,
+            standardRuleset,
             ENSParams.VOTING_DELAY,
             ENSParams.VOTING_PERIOD,
-            ENSParams.PROPOSAL_THRESHOLD,
-            ENSParams.QUORUM_NUMERATOR
+            ENSParams.PROPOSAL_THRESHOLD
         );
+        require(address(scaffold) == predictedGovernor, "scaffold governor address prediction failed");
         scaffoldGov = IGov(address(scaffold));
 
         // Migration end-state on the REAL timelock (it is its own admin on mainnet).
