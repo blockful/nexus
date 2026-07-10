@@ -49,6 +49,18 @@ contract StandardRulesetTest is Test {
         governor.setSnapshot(PROPOSAL_ID, block.number - 1);
     }
 
+    // ─────────────────────────── Constructor ───────────────────────────
+
+    function test_constructor_succeedsWithQuorumNumeratorEqualToDenominator() public {
+        StandardRuleset rulesetAtBoundary = new StandardRuleset(address(governor), IVotes(address(token)), 100);
+        assertEq(rulesetAtBoundary.quorumNumerator(), 100);
+    }
+
+    function test_constructor_revertsWithQuorumNumeratorAboveDenominator() public {
+        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.InvalidQuorumFraction.selector, 101, 100));
+        new StandardRuleset(address(governor), IVotes(address(token)), 101);
+    }
+
     function _countVote(address voter, uint8 support, uint256 weight) internal returns (uint256) {
         vm.prank(address(governor));
         return ruleset.countVote(PROPOSAL_ID, voter, support, weight, "");
@@ -86,6 +98,14 @@ contract StandardRulesetTest is Test {
     function test_countVote_against_doesNotCountTowardSuccess() public {
         _countVote(alice, 0, 600e18);
         assertFalse(ruleset.voteSucceeded(PROPOSAL_ID)); // against (600e18) not < for (0)
+    }
+
+    function test_countVote_against_accumulatesInBucket() public {
+        // Cast equal FOR and AGAINST votes — a tie.
+        // This proves the against bucket actually accumulated, since success requires for > against.
+        _countVote(alice, 1, 600e18); // for
+        _countVote(bob, 0, 600e18); // against, same weight
+        assertFalse(ruleset.voteSucceeded(PROPOSAL_ID)); // for (600e18) not > against (600e18)
     }
 
     function test_countVote_for_countsTowardSuccess() public {

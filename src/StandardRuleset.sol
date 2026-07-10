@@ -50,6 +50,8 @@ contract StandardRuleset is IRuleset {
     error InvalidVoteType();
     /// @notice `caller` is not the governor this ruleset was deployed for.
     error Unauthorized(address caller);
+    /// @notice `numerator` exceeds the denominator (100), which would yield a quorum > 100%.
+    error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
 
     modifier onlyGovernor() {
         if (msg.sender != governor) revert Unauthorized(msg.sender);
@@ -57,6 +59,9 @@ contract StandardRuleset is IRuleset {
     }
 
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_) {
+        if (quorumNumerator_ > QUORUM_DENOMINATOR) {
+            revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
+        }
         governor = governor_;
         token = token_;
         quorumNumerator = quorumNumerator_;
