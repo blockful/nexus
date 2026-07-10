@@ -25,6 +25,19 @@ contract ParityTest is BaseTest {
         assertEq(scaffoldGov.timelock(), liveGov.timelock());
     }
 
+    /// @dev The governor's clock is sourced from the token: v5 `GovernorVotes.clock()` adopts
+    ///      `token().clock()` and only falls back to block-number when the token predates
+    ///      ERC-6372. The live ENS token is old `ERC20Votes` with no clock, so the scaffold
+    ///      resolves to block-number — which is what makes the block-denominated VOTING_DELAY
+    ///      / VOTING_PERIOD mean blocks. If a future token swap/upgrade ever flipped the clock
+    ///      to timestamp mode, `45_818` would silently become ~12.7h instead of ~1 week; this
+    ///      assertion turns that regression red. (Live gov predates ERC-6372, so this is a
+    ///      scaffold-side invariant, not an A/B assertion.)
+    function test_scaffold_clockIsBlockNumber() public view {
+        assertEq(scaffold.CLOCK_MODE(), "mode=blocknumber&from=default");
+        assertEq(uint256(scaffold.clock()), block.number);
+    }
+
     function test_parity_quorum() public {
         // v5 checkpoints the quorum numerator at deployment, so query from the deploy
         // block onward (the pre-deployment window is pinned in Divergences).
