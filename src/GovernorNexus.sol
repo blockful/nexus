@@ -41,8 +41,15 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     ///         `proposalThreshold` and backs untyped proposals.
     uint8 public defaultTypeId;
 
-    /// @dev Proposal-to-type pin, written at propose time (Task 3).
+    /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
+
+    /// @dev Transaction-scoped propose-time type context (EIP-1153 transient storage, spec
+    ///      D10). Holds `typeId + 1` only while `_proposeWithType` runs `super._propose`, so
+    ///      `votingDelay()`/`votingPeriod()` serve the typed line values to the stock
+    ///      `_propose` body without a persistent-storage handoff; 0 means "unset", keeping
+    ///      type 0 distinguishable from "no context". `uint16` so `typeId + 1` cannot wrap.
+    uint16 private transient _typeContext;
 
     /// @notice A new type was appended to the table.
     event TypeRegistered(
@@ -56,6 +63,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     event TypeActiveSet(uint8 indexed typeId, bool active);
     /// @notice The default type pointer moved.
     event DefaultTypeSet(uint8 indexed typeId);
+    /// @notice A proposal was created and pinned to `typeId` (companion to the stock
+    ///         `ProposalCreated`, emitted in the same call).
+    event ProposalTypedCreated(uint256 indexed proposalId, uint8 indexed typeId, IRuleset indexed ruleset);
 
     /// @notice `ruleset` is the zero address.
     error RulesetZeroAddress();
@@ -175,17 +185,103 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return _types[proposalType(proposalId)].ruleset;
     }
 
+    // ─────────────────────────── Propose paths ───────────────────────────
+
+    /// @notice Create a proposal governed by type `typeId`, pinning it for its lifetime.
+    /// @dev Mirrors the stock `propose()` pre-checks with per-type parameters: the
+    ///      `#proposer=` suffix defense, type existence + `active`, and the type line's
+    ///      `proposalThreshold` against the proposer's votes at `clock() - 1`. Everything
+    ///      else (length/duplicate validation, storage, `ProposalCreated`) runs in the
+    ///      stock `_propose` via {_proposeWithType}.
+    /// @param targets Call targets, one per action.
+    /// @param values ETH values, one per action.
+    /// @param calldatas Encoded calls, one per action.
+    /// @param description Human-readable description; hashed into the proposal id.
+    /// @param typeId Registered, active proposal type to pin.
+    /// @return proposalId Stock type-agnostic proposal id (typeId is NOT hashed — spec D2).
+    function proposeWithType(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description,
+        uint8 typeId
+    ) public virtual returns (uint256) {
+        address proposer = _msgSender();
+
+        // check description restriction (stock `propose` shape, enforced on both doors)
+        if (!_isValidDescriptionForProposer(proposer, description)) {
+            revert GovernorRestrictedProposer(proposer);
+        }
+
+        // type must exist and accept new proposals
+        if (typeId >= typeCount) revert NonexistentType(typeId);
+        if (!_types[typeId].active) revert TypeInactive(typeId);
+
+        // check proposal threshold (stock shape, against the type line)
+        uint256 votesThreshold = _types[typeId].proposalThreshold;
+        if (votesThreshold > 0) {
+            uint256 proposerVotes = getVotes(proposer, clock() - 1);
+            if (proposerVotes < votesThreshold) {
+                revert GovernorInsufficientProposerVotes(proposer, proposerVotes, votesThreshold);
+            }
+        }
+
+        return _proposeWithType(targets, values, calldatas, description, proposer, typeId);
+    }
+
+    /// @notice Stock door: equivalent to `proposeWithType(..., defaultTypeId)`.
+    /// @dev Thin wrapper — all checks live in {proposeWithType}, so both doors route
+    ///      through {_proposeWithType} and every created proposal carries a pin.
+    function propose(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description
+    ) public virtual override returns (uint256) {
+        return proposeWithType(targets, values, calldatas, description, defaultTypeId);
+    }
+
+    /// @dev Creates the proposal through the stock `_propose` (sole `ProposalCore` writer —
+    ///      it is `private` storage in OZ v5.6.1) under a transient type context, then pins.
+    ///
+    ///      Safety of the transient handoff (spec D10): stock `_propose`
+    ///      (Governor.sol:305-341) makes zero external calls, so `_typeContext` is set and
+    ///      cleared entirely within this frame and is unobservable from outside the
+    ///      contract — there is no reentrancy window in which `votingDelay()`/
+    ///      `votingPeriod()` could mislead an external reader, and at rest they remain
+    ///      honest default-type views. The clear after the `super` call is belt-and-braces
+    ///      on top of the EIP-1153 end-of-transaction reset.
+    function _proposeWithType(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description,
+        address proposer,
+        uint8 typeId
+    ) internal virtual returns (uint256 proposalId) {
+        _typeContext = uint16(typeId) + 1;
+        proposalId = super._propose(targets, values, calldatas, description, proposer);
+        _typeContext = 0;
+
+        _proposalType[proposalId] = typeId;
+        emit ProposalTypedCreated(proposalId, typeId, _types[typeId].ruleset);
+    }
+
     // ─────────────────────── Default-type settings views ───────────────────────
-    // Final spec form: the governor's propose-time parameters read the default type row.
+    // Final spec form: the governor's propose-time parameters read the default type row —
+    // except under the transient propose-time context, when they serve the typed line
+    // (see `_proposeWithType`; never observable externally).
 
     /// @inheritdoc Governor
     function votingDelay() public view virtual override returns (uint256) {
-        return _types[defaultTypeId].votingDelay;
+        uint256 ctx = _typeContext;
+        return _types[ctx != 0 ? uint8(ctx - 1) : defaultTypeId].votingDelay;
     }
 
     /// @inheritdoc Governor
     function votingPeriod() public view virtual override returns (uint256) {
-        return _types[defaultTypeId].votingPeriod;
+        uint256 ctx = _typeContext;
+        return _types[ctx != 0 ? uint8(ctx - 1) : defaultTypeId].votingPeriod;
     }
 
     /// @inheritdoc Governor

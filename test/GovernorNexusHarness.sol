@@ -78,6 +78,15 @@ contract GovernorNexusHarness is GovernorNexus, GovernorCountingSimple {
     // Diamond re-resolution: GovernorNexus's overrides vs the Governor copy reached
     // through GovernorCountingSimple. `super` routes back to GovernorNexus.
 
+    function propose(
+        address[] memory targets,
+        uint256[] memory values,
+        bytes[] memory calldatas,
+        string memory description
+    ) public override(Governor, GovernorNexus) returns (uint256) {
+        return super.propose(targets, values, calldatas, description);
+    }
+
     function state(uint256 proposalId) public view override(Governor, GovernorNexus) returns (ProposalState) {
         return super.state(proposalId);
     }
