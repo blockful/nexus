@@ -3,135 +3,21 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
-import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
-import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
 
-/// @dev Test-only harness: supplies working `GovernorCountingSimple` counting so the full
-///      governance loop (propose → vote → queue → execute) can run. Production
-///      `GovernorNexus` keeps its Task 4 revert stubs; this exists ONLY to reach the
-///      `onlyGovernance` setters through real execution. The surface under test is
-///      100% `GovernorNexus`.
-contract GovernorNexusHarness is GovernorNexus, GovernorCountingSimple {
-    constructor(
-        IVotes token,
-        TimelockController timelock,
-        IRuleset standardRuleset,
-        uint48 votingDelay_,
-        uint32 votingPeriod_,
-        uint256 proposalThreshold_
-    ) GovernorNexus(token, timelock, standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_) {}
-
-    function quorum(uint256) public pure override(Governor, GovernorNexus) returns (uint256) {
-        return 1; // trivial: any cast vote clears it
-    }
-
-    function proposalThreshold() public view override(Governor, GovernorNexus) returns (uint256) {
-        return super.proposalThreshold();
-    }
-
-    function COUNTING_MODE() public pure override(GovernorNexus, GovernorCountingSimple) returns (string memory) {
-        return GovernorCountingSimple.COUNTING_MODE();
-    }
-
-    function hasVoted(uint256 proposalId, address account)
-        public
-        view
-        override(GovernorNexus, GovernorCountingSimple)
-        returns (bool)
-    {
-        return GovernorCountingSimple.hasVoted(proposalId, account);
-    }
-
-    function _quorumReached(uint256 proposalId)
-        internal
-        view
-        override(GovernorNexus, GovernorCountingSimple)
-        returns (bool)
-    {
-        return GovernorCountingSimple._quorumReached(proposalId);
-    }
-
-    function _voteSucceeded(uint256 proposalId)
-        internal
-        view
-        override(GovernorNexus, GovernorCountingSimple)
-        returns (bool)
-    {
-        return GovernorCountingSimple._voteSucceeded(proposalId);
-    }
-
-    function _countVote(uint256 proposalId, address account, uint8 support, uint256 weight, bytes memory params)
-        internal
-        override(GovernorNexus, GovernorCountingSimple)
-        returns (uint256)
-    {
-        return GovernorCountingSimple._countVote(proposalId, account, support, weight, params);
-    }
-
-    // Diamond re-resolution: GovernorNexus's overrides vs the Governor copy reached
-    // through GovernorCountingSimple. `super` routes back to GovernorNexus.
-
-    function propose(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        string memory description
-    ) public override(Governor, GovernorNexus) returns (uint256) {
-        return super.propose(targets, values, calldatas, description);
-    }
-
-    function state(uint256 proposalId) public view override(Governor, GovernorNexus) returns (ProposalState) {
-        return super.state(proposalId);
-    }
-
-    function proposalNeedsQueuing(uint256 proposalId) public view override(Governor, GovernorNexus) returns (bool) {
-        return super.proposalNeedsQueuing(proposalId);
-    }
-
-    function _queueOperations(
-        uint256 proposalId,
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) internal override(Governor, GovernorNexus) returns (uint48) {
-        return super._queueOperations(proposalId, targets, values, calldatas, descriptionHash);
-    }
-
-    function _executeOperations(
-        uint256 proposalId,
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) internal override(Governor, GovernorNexus) {
-        super._executeOperations(proposalId, targets, values, calldatas, descriptionHash);
-    }
-
-    function _cancel(
-        address[] memory targets,
-        uint256[] memory values,
-        bytes[] memory calldatas,
-        bytes32 descriptionHash
-    ) internal override(Governor, GovernorNexus) returns (uint256) {
-        return super._cancel(targets, values, calldatas, descriptionHash);
-    }
-
-    function _executor() internal view override(Governor, GovernorNexus) returns (address) {
-        return super._executor();
-    }
-}
-
-/// @dev Shared fixture for GovernorNexus unit suites: deploys token + timelock + harness
-///      governor + bootstrap ruleset, funds a majority voter, and provides the governance
-///      loop that is the only path to the `onlyGovernance` setters.
+/// @dev Shared fixture for GovernorNexus unit suites: deploys token + timelock + plain
+///      `GovernorNexus` + bootstrap ruleset, funds a majority voter, and provides the
+///      governance loop that is the only path to the `onlyGovernance` setters.
+///
+///      With real ruleset counting in place (Task 4) the suites run against production
+///      `GovernorNexus` directly — no counting mixin, no subclass. The bootstrap ruleset's
+///      1% quorum is trivially cleared by alice's 2_000_000e18 (the only funded holder here,
+///      so total supply == her balance), keeping the governance loop passing.
 abstract contract GovernorNexusTestBase is Test {
     uint256 internal constant TIMELOCK_DELAY = 2 days;
 
@@ -141,7 +27,7 @@ abstract contract GovernorNexusTestBase is Test {
 
     MockENSToken internal token;
     TimelockController internal timelock;
-    GovernorNexusHarness internal governor;
+    GovernorNexus internal governor;
     StandardRuleset internal standardRuleset;
 
     address internal alice = makeAddr("alice"); // proposer + majority voter
@@ -154,12 +40,18 @@ abstract contract GovernorNexusTestBase is Test {
         token = new MockENSToken();
         timelock = new TimelockController(TIMELOCK_DELAY, new address[](0), new address[](0), address(this));
 
-        // Governor arg is irrelevant to these unit suites (countVote is never reached here).
-        standardRuleset = new StandardRuleset(address(0xBEEF), IVotes(address(token)), 1);
+        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // quorumReached reads governor.proposalSnapshot, so the bootstrap ruleset must know
+        // the governor address — but the governor constructor needs the ruleset. Break the
+        // cycle by precomputing the governor's CREATE address (this deployer's next nonce
+        // + 1) and asserting the prediction held.
+        address predictedGovernor = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        standardRuleset = new StandardRuleset(predictedGovernor, IVotes(address(token)), 1);
 
-        governor = new GovernorNexusHarness(
+        governor = new GovernorNexus(
             IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
         );
+        require(address(governor) == predictedGovernor, "governor address prediction failed");
 
         timelock.grantRole(timelock.PROPOSER_ROLE(), address(governor));
         timelock.grantRole(timelock.CANCELLER_ROLE(), address(governor));
@@ -176,7 +68,7 @@ abstract contract GovernorNexusTestBase is Test {
         token.delegate(account);
     }
 
-    /// @dev Deploys a fresh StandardRuleset (a valid IRuleset) for registration tests.
+    /// @dev Deploys a fresh StandardRuleset (a valid IRuleset) wired to the fixture governor.
     function _newRuleset() internal returns (StandardRuleset) {
         return new StandardRuleset(address(governor), IVotes(address(token)), 1);
     }

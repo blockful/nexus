@@ -8,7 +8,7 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {IRuleset} from "../src/IRuleset.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {GovernorNexusHarness, GovernorNexusTestBase} from "./GovernorNexusHarness.sol";
+import {GovernorNexusTestBase} from "./GovernorNexusHarness.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — exercises the "165 but wrong interface" guardrail.
 contract Mock165 is IERC165 {
@@ -55,27 +55,27 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
     function test_constructor_emitsTypeRegistered() public {
         vm.expectEmit(true, true, false, true);
         emit TypeRegistered(0, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
-        new GovernorNexusHarness(
+        new GovernorNexus(
             IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
         );
     }
 
     function test_constructor_revertsOnZeroRuleset() public {
         vm.expectRevert(GovernorNexus.RulesetZeroAddress.selector);
-        new GovernorNexusHarness(
+        new GovernorNexus(
             IVotes(address(token)), timelock, IRuleset(address(0)), VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
         );
     }
 
     function test_constructor_revertsOnZeroVotingPeriod() public {
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
-        new GovernorNexusHarness(IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD);
+        new GovernorNexus(IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD);
     }
 
     function test_constructor_revertsOnNonRulesetInterface() public {
         Mock165 notRuleset = new Mock165();
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.RulesetInterfaceUnsupported.selector, address(notRuleset)));
-        new GovernorNexusHarness(
+        new GovernorNexus(
             IVotes(address(token)),
             timelock,
             IRuleset(address(notRuleset)),

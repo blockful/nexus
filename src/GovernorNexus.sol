@@ -79,8 +79,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
-    /// @dev Counting is dispatched to the ruleset in Task 4; the core does not tally.
-    error CountingNotImplemented();
 
     /// @param token Voting token (block-number or timestamp clock, per the token).
     /// @param timelock Executor holding queued proposals; also the sole governance caller.
@@ -275,12 +273,18 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @inheritdoc Governor
     function votingDelay() public view virtual override returns (uint256) {
         uint256 ctx = _typeContext;
+        // `ctx` is `typeId + 1` with `typeId` a uint8 (see `_proposeWithType`), so `ctx - 1`
+        // always fits uint8; the truncating-cast lint does not apply.
+        // forge-lint: disable-next-line(unsafe-typecast)
         return _types[ctx != 0 ? uint8(ctx - 1) : defaultTypeId].votingDelay;
     }
 
     /// @inheritdoc Governor
     function votingPeriod() public view virtual override returns (uint256) {
         uint256 ctx = _typeContext;
+        // `ctx` is `typeId + 1` with `typeId` a uint8 (see `_proposeWithType`), so `ctx - 1`
+        // always fits uint8; the truncating-cast lint does not apply.
+        // forge-lint: disable-next-line(unsafe-typecast)
         return _types[ctx != 0 ? uint8(ctx - 1) : defaultTypeId].votingPeriod;
     }
 
@@ -289,35 +293,66 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return _types[defaultTypeId].proposalThreshold;
     }
 
-    // ─────────────────────────── Counting hooks (Task 4) ───────────────────────────
-    // Placeholders until ruleset dispatch lands; kept abstract-satisfying and reverting.
+    // ─────────────────────────── Counting dispatch (Task 4) ───────────────────────────
+    // The core never tallies: every counting hook forwards to the ruleset pinned to the
+    // proposal's type. `COUNTING_MODE`/`quorum` take no proposal id, so they are documented
+    // default-type views over `defaultTypeId`'s ruleset (per-proposal answers are reachable
+    // via `proposalRuleset(id)`).
 
-    /// @inheritdoc IGovernor
-    // solhint-disable-next-line func-name-mixedcase
-    function COUNTING_MODE() public view virtual override returns (string memory) {
-        revert CountingNotImplemented();
+    /// @dev The ruleset governing `proposalId`, resolved through its propose-time type pin.
+    ///      Safe without an existence check on the hot path: the pin is written once at
+    ///      creation and the type row's ruleset is content-immutable, and stock `Governor`
+    ///      state checks reject votes/queries on nonexistent proposals before counting is
+    ///      reached. A read-only `hasVoted` on a never-created id is the sole exception (see
+    ///      its natspec).
+    function _rulesetOf(uint256 proposalId) private view returns (IRuleset) {
+        return _types[_proposalType[proposalId]].ruleset;
     }
 
     /// @inheritdoc IGovernor
-    function hasVoted(uint256, address) public view virtual override returns (bool) {
-        revert CountingNotImplemented();
+    /// @dev Default-type view: the counting scheme of `defaultTypeId`'s ruleset. A specific
+    ///      proposal's mode is `proposalRuleset(id).COUNTING_MODE()`.
+    // solhint-disable-next-line func-name-mixedcase
+    function COUNTING_MODE() public view virtual override returns (string memory) {
+        return _types[defaultTypeId].ruleset.COUNTING_MODE();
+    }
+
+    /// @inheritdoc IGovernor
+    /// @dev Delegates to the proposal's ruleset. For a never-created `proposalId` this reads
+    ///      the type-0 ruleset's (empty) tally and returns false rather than reverting — no
+    ///      existence guard is added, since the answer is harmless and the hot path stays
+    ///      cheap; use `proposalType`/`proposalRuleset` when an existence check is required.
+    function hasVoted(uint256 proposalId, address account) public view virtual override returns (bool) {
+        return _rulesetOf(proposalId).hasVoted(proposalId, account);
     }
 
     /// @inheritdoc Governor
-    function quorum(uint256) public view virtual override returns (uint256) {
-        revert CountingNotImplemented();
+    /// @dev Default-type view: quorum threshold from `defaultTypeId`'s ruleset at `timepoint`.
+    function quorum(uint256 timepoint) public view virtual override returns (uint256) {
+        return _types[defaultTypeId].ruleset.quorum(timepoint);
     }
 
-    function _quorumReached(uint256) internal view virtual override returns (bool) {
-        revert CountingNotImplemented();
+    /// @dev Whether the proposal's ruleset considers quorum met.
+    function _quorumReached(uint256 proposalId) internal view virtual override returns (bool) {
+        return _rulesetOf(proposalId).quorumReached(proposalId);
     }
 
-    function _voteSucceeded(uint256) internal view virtual override returns (bool) {
-        revert CountingNotImplemented();
+    /// @dev Whether the proposal's ruleset considers the vote successful.
+    function _voteSucceeded(uint256 proposalId) internal view virtual override returns (bool) {
+        return _rulesetOf(proposalId).voteSucceeded(proposalId);
     }
 
-    function _countVote(uint256, address, uint8, uint256, bytes memory) internal virtual override returns (uint256) {
-        revert CountingNotImplemented();
+    /// @dev Routes a cast vote to the proposal's ruleset, which owns tallying and rule
+    ///      enforcement (one-vote-per-voter, valid support). `totalWeight` is the core's
+    ///      token-checkpoint weight at the frozen snapshot; the ruleset buckets it and can
+    ///      never invent it. The returned counted weight bubbles back to `_castVote`.
+    function _countVote(uint256 proposalId, address account, uint8 support, uint256 totalWeight, bytes memory params)
+        internal
+        virtual
+        override
+        returns (uint256)
+    {
+        return _rulesetOf(proposalId).countVote(proposalId, account, support, totalWeight, params);
     }
 
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
