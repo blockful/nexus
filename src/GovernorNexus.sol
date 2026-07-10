@@ -80,6 +80,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
 
+    /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
+    ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
+    ///        the ENS deployment, so vote-by-sig signatures match the live governor's
+    ///        domain), leaving the contract itself reusable across deployments (spec D11).
     /// @param token Voting token (block-number or timestamp clock, per the token).
     /// @param timelock Executor holding queued proposals; also the sole governance caller.
     /// @param standardRuleset Ruleset for the bootstrap type (row 0), the default.
@@ -89,13 +93,14 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Registers row 0 under the same guardrails as `registerType` and sets it as the
     ///      default, atomically. No deployer-privileged post-deploy setup exists.
     constructor(
+        string memory name_,
         IVotes token,
         TimelockController timelock,
         IRuleset standardRuleset,
         uint48 votingDelay_,
         uint32 votingPeriod_,
         uint256 proposalThreshold_
-    ) Governor("GovernorNexus") GovernorVotes(token) GovernorTimelockControl(timelock) {
+    ) Governor(name_) GovernorVotes(token) GovernorTimelockControl(timelock) {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
     }

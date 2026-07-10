@@ -56,26 +56,41 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         vm.expectEmit(true, true, false, true);
         emit TypeRegistered(0, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
         new GovernorNexus(
-            IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            standardRuleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD
         );
     }
 
     function test_constructor_revertsOnZeroRuleset() public {
         vm.expectRevert(GovernorNexus.RulesetZeroAddress.selector);
         new GovernorNexus(
-            IVotes(address(token)), timelock, IRuleset(address(0)), VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            IRuleset(address(0)),
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD
         );
     }
 
     function test_constructor_revertsOnZeroVotingPeriod() public {
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
-        new GovernorNexus(IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD);
+        new GovernorNexus(
+            "GovernorNexus", IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD
+        );
     }
 
     function test_constructor_revertsOnNonRulesetInterface() public {
         Mock165 notRuleset = new Mock165();
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.RulesetInterfaceUnsupported.selector, address(notRuleset)));
         new GovernorNexus(
+            "GovernorNexus",
             IVotes(address(token)),
             timelock,
             IRuleset(address(notRuleset)),

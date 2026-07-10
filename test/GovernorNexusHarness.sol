@@ -49,7 +49,13 @@ abstract contract GovernorNexusTestBase is Test {
         standardRuleset = new StandardRuleset(predictedGovernor, IVotes(address(token)), 1);
 
         governor = new GovernorNexus(
-            IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            standardRuleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 

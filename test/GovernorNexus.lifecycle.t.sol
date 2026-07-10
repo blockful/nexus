@@ -60,7 +60,13 @@ contract GovernorNexusLifecycleTest is Test {
         address predictedGovernor = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
         standardRuleset = new StandardRuleset(predictedGovernor, IVotes(address(token)), Q0_NUMERATOR);
         governor = new GovernorNexus(
-            IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            standardRuleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 
