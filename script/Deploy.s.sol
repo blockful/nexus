@@ -32,6 +32,11 @@ import {ENSParams} from "../src/ENSParams.sol";
 ///      contract. `vm.readCallers()` reports that resolved address, so the nonce used for
 ///      the prediction is read from it, not from `address(this)`.
 contract Deploy is Script {
+    /// @notice Deploys `StandardRuleset` then `GovernorNexus` (in that order, address
+    ///         prediction enforced), wired to the live ENS token/timelock/params.
+    /// @return standardRuleset The deployed ruleset, registered as GovernorNexus's type 0.
+    /// @return governor The deployed GovernorNexus, at the address `standardRuleset` was
+    ///         constructed with.
     function run() external returns (StandardRuleset standardRuleset, GovernorNexus governor) {
         vm.startBroadcast();
         (, address broadcaster,) = vm.readCallers();

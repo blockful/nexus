@@ -294,6 +294,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     }
 
     /// @inheritdoc Governor
+    /// @dev Always the default type row — unlike `votingDelay`/`votingPeriod`, this is never
+    ///      served from the transient propose-time context, since `_propose` never reads
+    ///      `proposalThreshold()` (the threshold check runs upstream, in
+    ///      {proposeWithType}, against the pinned type's own line).
     function proposalThreshold() public view virtual override returns (uint256) {
         return _types[defaultTypeId].proposalThreshold;
     }
@@ -363,6 +367,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
     // Pure disambiguation between inherited modules; no behavior added.
 
+    /// @inheritdoc IGovernor
     function state(uint256 proposalId)
         public
         view
@@ -373,6 +378,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return super.state(proposalId);
     }
 
+    /// @inheritdoc IGovernor
     function proposalNeedsQueuing(uint256 proposalId)
         public
         view

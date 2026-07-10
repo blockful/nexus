@@ -26,6 +26,8 @@ contract StandardRuleset is IRuleset {
         Abstain
     }
 
+    /// @dev Per-proposal tally, keyed by proposal id. `for_` has the trailing underscore
+    ///      because `for` is a reserved word.
     struct ProposalVote {
         uint256 against;
         uint256 for_;
@@ -38,8 +40,12 @@ contract StandardRuleset is IRuleset {
     ///      surface beyond `IRuleset`, and this value is not overridable.
     uint256 private constant QUORUM_DENOMINATOR = 100;
 
+    /// @notice The single GovernorNexus this ruleset counts for; `countVote` is restricted
+    ///         to it and `quorumReached` reads its `proposalSnapshot`.
     address public immutable governor;
+    /// @notice Voting token whose past total supply anchors `quorum`.
     IVotes public immutable token;
+    /// @notice Quorum numerator over the fixed 100 denominator (e.g. `1` = 1%).
     uint256 public immutable quorumNumerator;
 
     mapping(uint256 => ProposalVote) private _proposalVotes;
@@ -58,6 +64,12 @@ contract StandardRuleset is IRuleset {
         _;
     }
 
+    /// @param governor_ The GovernorNexus this ruleset is deployed for; immutable and never
+    ///        revisited, so it must be the address the governor will actually deploy to (see
+    ///        the deploy script's CREATE-address precompute for the chicken-and-egg fix).
+    /// @param token_ Voting token backing `quorum`'s past-total-supply lookup.
+    /// @param quorumNumerator_ Numerator over the fixed 100 denominator; reverts
+    ///        `InvalidQuorumFraction` above 100.
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_) {
         if (quorumNumerator_ > QUORUM_DENOMINATOR) {
             revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
