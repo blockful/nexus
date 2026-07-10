@@ -190,4 +190,34 @@ contract StandardRulesetTest is Test {
     function test_countingMode() public view {
         assertEq(ruleset.COUNTING_MODE(), "support=bravo&quorum=for,abstain");
     }
+
+    // ─────────────────────────── proposalVotes ───────────────────────────
+
+    function test_proposalVotes_zeroStateForUnknownId() public view {
+        (uint256 against, uint256 for_, uint256 abstain) = ruleset.proposalVotes(PROPOSAL_ID);
+        assertEq(against, 0);
+        assertEq(for_, 0);
+        assertEq(abstain, 0);
+    }
+
+    function test_proposalVotes_bucketsAccumulateIndependently() public {
+        _countVote(alice, 0, 600e18); // against
+        _countVote(bob, 1, 350e18); // for
+        _countVote(carol, 2, 50e18); // abstain
+
+        (uint256 against, uint256 for_, uint256 abstain) = ruleset.proposalVotes(PROPOSAL_ID);
+        assertEq(against, 600e18);
+        assertEq(for_, 350e18);
+        assertEq(abstain, 50e18);
+    }
+
+    function test_proposalVotes_unknownIdReturnsZeros() public {
+        uint256 untouchedProposal = 999;
+        _countVote(alice, 1, 600e18); // vote on PROPOSAL_ID, not untouchedProposal
+
+        (uint256 against, uint256 for_, uint256 abstain) = ruleset.proposalVotes(untouchedProposal);
+        assertEq(against, 0);
+        assertEq(for_, 0);
+        assertEq(abstain, 0);
+    }
 }

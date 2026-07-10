@@ -109,6 +109,11 @@ contract StandardRuleset is IRuleset {
     }
 
     /// @inheritdoc IRuleset
+    /// @dev A `proposalId` this ruleset never counted reads from empty-tally defaults, same
+    ///      as `hasVoted`. That can make this return `true` for an uncounted id whenever
+    ///      `quorum(0) == 0` (e.g. a zero quorum numerator, or a token with no supply at
+    ///      timepoint 0) — callers must gate on proposal existence; the governor does this
+    ///      via `state()`.
     function quorumReached(uint256 proposalId) external view returns (bool) {
         ProposalVote storage proposalVote = _proposalVotes[proposalId];
         uint256 snapshot = IRulesetGovernor(governor).proposalSnapshot(proposalId);
@@ -126,6 +131,20 @@ contract StandardRuleset is IRuleset {
     ///      default) rather than reverting.
     function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
         return _proposalVotes[proposalId].hasVoted[voter];
+    }
+
+    /// @notice Per-bucket tally for `proposalId`, mirroring OZ `GovernorCountingSimple`'s
+    ///         `proposalVotes` (same name, same return order) so tooling pointed at the
+    ///         governor via `governor.proposalRuleset(id)` and then this getter just works.
+    /// @dev A `proposalId` this ruleset never counted returns all-zero (empty-tally default,
+    ///      same no-revert contract as `hasVoted`), never reverts.
+    function proposalVotes(uint256 proposalId)
+        external
+        view
+        returns (uint256 againstVotes, uint256 forVotes, uint256 abstainVotes)
+    {
+        ProposalVote storage proposalVote = _proposalVotes[proposalId];
+        return (proposalVote.against, proposalVote.for_, proposalVote.abstain);
     }
 
     /// @inheritdoc IRuleset

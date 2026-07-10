@@ -143,7 +143,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
 
     /// @dev Single registration path shared by the constructor and `registerType`, so
     ///      guardrails and the `TypeRegistered` event cannot drift. Ids are never reused;
-    ///      the `uint8 typeCount++` overflow caps the table at 256 rows.
+    ///      `typeCount++` on a `uint8` panics once `typeCount == 255`, so the last
+    ///      registrable id is 254 — the table caps at 255 rows (ids 0-254).
     function _registerType(IRuleset ruleset, uint48 votingDelay_, uint32 votingPeriod_, uint256 proposalThreshold_)
         private
         returns (uint8 id)
@@ -247,13 +248,15 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Creates the proposal through the stock `_propose` (sole `ProposalCore` writer —
     ///      it is `private` storage in OZ v5.6.1) under a transient type context, then pins.
     ///
-    ///      Safety of the transient handoff (spec D10): stock `_propose`
-    ///      (Governor.sol:305-341) makes zero external calls, so `_typeContext` is set and
-    ///      cleared entirely within this frame and is unobservable from outside the
-    ///      contract — there is no reentrancy window in which `votingDelay()`/
-    ///      `votingPeriod()` could mislead an external reader, and at rest they remain
-    ///      honest default-type views. The clear after the `super` call is belt-and-braces
-    ///      on top of the EIP-1153 end-of-transaction reset.
+    ///      Safety of the transient handoff (spec D10): the only external calls reachable
+    ///      under the context are staticcalls inside stock `_propose`'s (Governor.sol:305-341)
+    ///      duplicate-proposal branch (`state(proposalId)`, which can staticcall the ruleset
+    ///      past-deadline or the timelock when queued) — and that branch reverts
+    ///      unconditionally, so no committed state is ever produced while the context is
+    ///      set. There is no reentrancy window in which `votingDelay()`/`votingPeriod()`
+    ///      could mislead an external reader, and at rest they remain honest default-type
+    ///      views. The clear after the `super` call is belt-and-braces on top of the
+    ///      EIP-1153 end-of-transaction reset.
     function _proposeWithType(
         address[] memory targets,
         uint256[] memory values,

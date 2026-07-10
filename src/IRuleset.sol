@@ -18,6 +18,10 @@ interface IRuleset is IERC165 {
 
     /// @notice Whether `proposalId` has accumulated enough votes to meet quorum, per this
     ///         ruleset's own accounting.
+    /// @dev Mirrors `hasVoted`'s unknown-id contract: a `proposalId` this ruleset never
+    ///      counted is answered from empty-tally defaults, never a revert. That means this
+    ///      can read `true` for an uncounted id whenever `quorum(0) == 0` — callers must
+    ///      gate on proposal existence (the governor does via `state()`).
     function quorumReached(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `proposalId`'s tallied votes satisfy this ruleset's pass/fail rule.
