@@ -7,7 +7,7 @@ import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {IRuleset} from "../src/IRuleset.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {GovernorNexusTestBase} from "./GovernorNexusHarness.sol";
+import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 contract GovernorNexusProposeTest is GovernorNexusTestBase {
     // Type-1 line: every parameter distinct from type 0 (delay 1, period 50, threshold 100k)

@@ -44,7 +44,7 @@ behavior is per-type.
 | `test/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
-| `test/GovernorNexusHarness.sol` | Test fixture exposing internal hooks the suites above drive |
+| `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
 | `test/ENSGovernor.t.sol` | Unit suite for the Nexus 0 baseline (mock token, ENS-scale params) |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
