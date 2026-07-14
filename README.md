@@ -53,6 +53,10 @@ Two consequences worth reading before you build on it:
   threshold early, re-vote back below it, and burn a once-only trigger before the crossing that
   matters. Mechanisms needing finality (e.g. the anti-snipe extension in Nexus 3) must evaluate
   the outcome at the deadline, bar re-votes inside their own window, or gate early finality.
+- **Gasless relayers:** a direct `castVote*` spends the voter's EIP-712 nonce, so voting directly
+  invalidates any of that voter's outstanding signed ballots (across all open proposals — the
+  nonce is per-account). This stops a stale pre-signed ballot from overriding a later direct vote
+  under mutable votes; relayers must re-request a signature after a voter acts directly.
 
 ## Layout
 
