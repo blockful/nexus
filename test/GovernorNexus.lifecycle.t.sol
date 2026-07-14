@@ -295,12 +295,11 @@ contract GovernorNexusLifecycleTest is Test {
         governor.castVote(id, 0);
     }
 
-    /// @dev P3 from the prior-art pitfall registry: relaxing one-vote-per-voter re-opens the
-    ///      signature-replay surface that bit ScopeLift's Flexible Voting (weight double-counted
-    ///      by replaying a `castVoteBySig` call). Here the danger is subtler — a *stale* ballot
-    ///      replayed after the voter changed their mind would silently restore the old vote. OZ
-    ///      v5's per-account nonce forecloses it: the signature is consumed on first use.
-    function test_revote_staleSignatureCannotBeReplayedOverANewerVote() public {
+    /// @dev An already-submitted `castVoteBySig` ballot cannot be replayed: OZ v5 consumes the
+    ///      voter's EIP-712 nonce during signature validation, so the second submission of the same
+    ///      signature reverts. (This half was always foreclosed by OZ — the re-vote-specific half
+    ///      is the next test.)
+    function test_usedSignatureCannotBeReplayed() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
         _fund(signer, 30e18);
         vm.roll(block.number + 1);
@@ -310,15 +309,61 @@ contract GovernorNexusLifecycleTest is Test {
         bytes memory ballotFor = _signBallot(id, 1, signer, signerKey, governor.nonces(signer));
         governor.castVoteBySig(id, 1, signer, ballotFor);
 
-        vm.prank(signer);
-        governor.castVote(id, 0); // signer changes their mind: For -> Against
-
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
-        governor.castVoteBySig(id, 1, signer, ballotFor); // stale ballot must not restore the For vote
+        governor.castVoteBySig(id, 1, signer, ballotFor); // same signature, nonce already spent
+    }
+
+    /// @dev The stale-pre-signed-ballot override (audit-panel Medium, D21). A voter signs a gasless
+    ///      ballot and hands it to a relayer, but then changes their mind and votes directly. Under
+    ///      mutable votes the last-applied cast wins, so without a defense the relayer could submit
+    ///      the outstanding signature AFTERWARD to override the voter's direct vote. GovernorNexus
+    ///      closes it by spending the voter's nonce on every direct cast: a direct vote invalidates
+    ///      any outstanding signed ballot, so the relayer's stale ballot reverts.
+    function test_directVote_invalidatesOutstandingSignedBallot() public {
+        (address signer, uint256 signerKey) = makeAddrAndKey("signer");
+        _fund(signer, 30e18);
+        vm.roll(block.number + 1);
+
+        (uint256 id,,,,) = _proposeActive(1, "stale sig override", 0);
+
+        // Voter signs a For ballot for the relayer but does NOT submit it.
+        bytes memory pendingFor = _signBallot(id, 1, signer, signerKey, governor.nonces(signer));
+
+        // Voter changes their mind and votes Against directly.
+        vm.prank(signer);
+        governor.castVote(id, 0);
+
+        // The outstanding signature can no longer override the direct vote.
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
+        governor.castVoteBySig(id, 1, signer, pendingFor);
 
         (uint256 against, uint256 for_,) = standardRuleset.proposalVotes(id);
-        assertEq(for_, 0, "the stale For vote stays gone");
-        assertEq(against, 30e18, "the standing vote is the latest one, counted once");
+        assertEq(for_, 0, "the pending For ballot cannot override the direct vote");
+        assertEq(against, 30e18, "the direct Against vote stands");
+    }
+
+    /// @dev Accepted cost of the account-global nonce (D21, Variant 1): a direct vote on ONE
+    ///      proposal also invalidates the voter's outstanding signed ballots on OTHER open
+    ///      proposals, because OZ's vote nonce is per-account, not per-proposal. Deliberate
+    ///      trade-off — per-proposal scoping would change the relayer's signing scheme.
+    function test_directVote_invalidatesOutstandingSignaturesAcrossProposals() public {
+        (address signer, uint256 signerKey) = makeAddrAndKey("signer");
+        _fund(signer, 30e18);
+        vm.roll(block.number + 1);
+
+        (uint256 idA,,,,) = _proposeActive(1, "proposal A", 0);
+        (uint256 idB,,,,) = _proposeActive(2, "proposal B", 0);
+
+        // Voter signs a gasless ballot for proposal B and holds it.
+        bytes memory pendingB = _signBallot(idB, 1, signer, signerKey, governor.nonces(signer));
+
+        // Voter votes directly on proposal A — spends the account-global nonce.
+        vm.prank(signer);
+        governor.castVote(idA, 1);
+
+        // The ballot for B, signed against the now-spent nonce, is invalid too.
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
+        governor.castVoteBySig(idB, 1, signer, pendingB);
     }
 
     function _signBallot(uint256 proposalId, uint8 support, address voter, uint256 key, uint256 nonce)

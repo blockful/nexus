@@ -367,6 +367,44 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return _rulesetOf(proposalId).countVote(proposalId, account, support, totalWeight, params);
     }
 
+    // ─────────────────────────── Direct-vote nonce spend (D21) ───────────────────────────
+    // Under mutable votes (Nexus 2) the last-applied cast wins, so an outstanding signed ballot a
+    // voter handed a relayer could be submitted AFTER they change their mind and vote directly,
+    // overriding that direct vote. OZ only spends the EIP-712 vote nonce on the `bySig` paths, so a
+    // direct cast leaves outstanding signatures live. These overrides spend the voter's nonce on
+    // every direct cast too, so acting directly invalidates any outstanding signed ballot — the
+    // governance analogue of Seaport's `incrementCounter` / Permit2's `invalidateUnorderedNonces`.
+    // The nonce is account-global, so a direct vote invalidates the voter's pending vote-signatures
+    // across all open proposals, not just the one voted on (D21 accepted trade-off).
+
+    /// @inheritdoc IGovernor
+    function castVote(uint256 proposalId, uint8 support) public virtual override returns (uint256) {
+        _useNonce(_msgSender());
+        return super.castVote(proposalId, support);
+    }
+
+    /// @inheritdoc IGovernor
+    function castVoteWithReason(uint256 proposalId, uint8 support, string calldata reason)
+        public
+        virtual
+        override
+        returns (uint256)
+    {
+        _useNonce(_msgSender());
+        return super.castVoteWithReason(proposalId, support, reason);
+    }
+
+    /// @inheritdoc IGovernor
+    function castVoteWithReasonAndParams(uint256 proposalId, uint8 support, string calldata reason, bytes memory params)
+        public
+        virtual
+        override
+        returns (uint256)
+    {
+        _useNonce(_msgSender());
+        return super.castVoteWithReasonAndParams(proposalId, support, reason, params);
+    }
+
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
     // Pure disambiguation between inherited modules; no behavior added.
 
