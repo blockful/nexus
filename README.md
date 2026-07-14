@@ -3,12 +3,17 @@
 Production implementation of **Governor Nexus** — blockful's modular security upgrade
 for ENS governance ([RFC](https://discuss.ens.domains/t/rfc-governor-nexus-modular-security-upgrade-for-ens-governance/21942)).
 
-Current milestone (Nexus 1): `GovernorNexus`, a modular governor core that replaces a
-stock governor's baked-in settings/counting/quorum with a vote-governed registry of
-proposal types, each dispatching vote-counting to a pluggable external `IRuleset`.
-Behavioral parity against the live deployed ENS governor is proven on a mainnet fork,
-both for the bootstrap ruleset's counting semantics and for the governor's day-to-day
-surface. Nexus mechanisms continue to land milestone by milestone.
+Nexus 1 shipped `GovernorNexus`, a modular governor core that replaces a stock governor's
+baked-in settings/counting/quorum with a vote-governed registry of proposal types, each
+dispatching vote-counting to a pluggable external `IRuleset`. Behavioral parity against the
+live deployed ENS governor is proven on a mainnet fork, both for the bootstrap ruleset's
+counting semantics and for the governor's day-to-day surface.
+
+Current milestone (Nexus 2): **mutable votes** — while a proposal is open, casting again
+replaces your standing vote (the weight is debited from the old bucket and credited to the
+new one, atomically). This is the first *deliberate* behavioral divergence from the live ENS
+governor, which rejects a second vote; the fork suite pins it as such. Nexus mechanisms
+continue to land milestone by milestone.
 
 ## Architecture (Nexus 1)
 
@@ -24,11 +29,30 @@ never done by the core — `countVote`, `quorumReached`, `voteSucceeded`, and `h
 all dispatch to the proposal's pinned ruleset, an immutable, single-purpose contract the
 DAO can swap per type without touching the governor. `StandardRuleset` is the bootstrap
 ruleset (registered as type 0, the initial default): it reproduces the live ENS
-governor's Bravo-style vote buckets (Against/For/Abstain) and fractional quorum exactly,
-so a migrated DAO sees identical outcomes until it opts into new types. Untyped surface —
-`votingDelay()`, `votingPeriod()`, `quorum()`, `COUNTING_MODE()` — reads the current
-default type's row, so the governor stays a drop-in `IGovernor` even though its real
-behavior is per-type.
+governor's Bravo-style vote buckets (Against/For/Abstain) and fractional quorum exactly.
+Untyped surface — `votingDelay()`, `votingPeriod()`, `quorum()`, `COUNTING_MODE()` — reads
+the current default type's row, so the governor stays a drop-in `IGovernor` even though its
+real behavior is per-type.
+
+## Mutable votes (Nexus 2)
+
+Counting mechanics live in `RulesetCounting`, the abstract base every ruleset inherits: it
+owns the vote buckets and a per-voter receipt (`hasVoted`, `support`, `weight`), and it makes
+re-voting a **replace** — `countVote` debits the receipt's recorded weight from its recorded
+bucket before crediting the new vote, in the same call, so a voter's weight is never
+double-counted nor transiently missing. `hasVoted` therefore means "has a standing vote" and
+stays true across re-votes.
+
+Two consequences worth reading before you build on it:
+
+- **Indexers:** a re-vote emits another stock `VoteCast` for the same (proposal, voter). The
+  **latest one in log order is canonical** — do not sum them. `voteReceipt(proposalId, voter)`
+  returns the current standing vote directly.
+- **Tallies are non-monotonic:** quorum and success can flip in *both* directions while voting
+  is open. Nothing may arm one-shot state on a tally-crossing event — an attacker could cross a
+  threshold early, re-vote back below it, and burn a once-only trigger before the crossing that
+  matters. Mechanisms needing finality (e.g. the anti-snipe extension in Nexus 3) must evaluate
+  the outcome at the deadline, bar re-votes inside their own window, or gate early finality.
 
 ## Layout
 
@@ -36,7 +60,8 @@ behavior is per-type.
 |---|---|
 | `src/GovernorNexus.sol` | Nexus 1 governor core — proposal-type registry, per-proposal pin, ruleset dispatch |
 | `src/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
-| `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity counting (Bravo buckets, fractional quorum) |
+| `src/RulesetCounting.sol` | Nexus 2 counting base every ruleset inherits — Bravo buckets, per-voter receipts, **mutable votes** (a re-vote replaces the standing vote) |
+| `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
 | `src/ENSGovernor.sol` | Nexus 0 baseline (kept for reference) — stock OZ v5.6.1 composition, zero custom logic |
 | `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
 | `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
@@ -45,6 +70,7 @@ behavior is per-type.
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
 | `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
+| `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
 | `test/ENSGovernor.t.sol` | Unit suite for the Nexus 0 baseline (mock token, ENS-scale params) |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
