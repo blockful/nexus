@@ -9,6 +9,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {IRuleset} from "../src/IRuleset.sol";
+import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 import {Box} from "./mocks/Box.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
@@ -241,15 +242,105 @@ contract GovernorNexusLifecycleTest is Test {
         assertEq(uint8(_state(id)), uint8(IGovernor.ProposalState.Succeeded));
     }
 
-    // ─────────────────────── 3. Revote rejected ───────────────────────
+    // ─────────────────────── 3. Revote replaces (Nexus 2, D12/D15/D17) ───────────────────────
 
-    function test_revote_revertsAlreadyVoted() public {
-        (uint256 id,,,,) = _proposeActive(1, "revote", 0);
+    /// @dev End-to-end proof that the outcome follows the *standing* votes: alice (50e18) carries
+    ///      the proposal, then re-votes Against — at the deadline the proposal is Defeated, the
+    ///      For bucket holding only bob's weight.
+    function test_revote_outcomeFollowsTheLatestVote() public {
+        (uint256 id,,,,) = _proposeActive(1, "revote decides", 0);
+        _vote(id, alice, 1); // For 50e18
+        _vote(id, bob, 1); // For 10e18  → For 60e18, quorum (20e18) reached, succeeding
+        assertTrue(standardRuleset.voteSucceeded(id));
+
+        _vote(id, alice, 0); // alice re-votes Against 50e18 → For 10e18, Against 50e18
+
+        (uint256 against, uint256 for_,) = standardRuleset.proposalVotes(id);
+        assertEq(for_, 10e18, "alice's weight left the For bucket");
+        assertEq(against, 50e18, "and landed in Against: counted once, not twice");
+        assertTrue(governor.hasVoted(id, alice), "hasVoted means 'has a standing vote'");
+
+        vm.roll(governor.proposalDeadline(id) + 1);
+        assertEq(uint8(_state(id)), uint8(IGovernor.ProposalState.Defeated));
+    }
+
+    /// @dev D15: no new event — the core re-emits stock `VoteCast` on every cast, so an indexer's
+    ///      rule is "latest VoteCast per (proposal, voter), in log order, is canonical".
+    function test_revote_emitsVoteCastAgain() public {
+        (uint256 id,,,,) = _proposeActive(1, "revote emits", 0);
         _vote(id, alice, 1);
 
+        vm.expectEmit(true, true, true, true, address(governor));
+        emit IGovernor.VoteCast(alice, id, 0, 50e18, "");
         vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.AlreadyVoted.selector, alice));
         governor.castVote(id, 0);
+    }
+
+    /// @dev D17: the ruleset never reads the clock — the core's Active-state gate is what closes
+    ///      the re-vote window, exactly as it closes the first-vote window.
+    function test_revote_afterDeadline_revertsInTheCore() public {
+        (uint256 id,,,,) = _proposeActive(1, "revote too late", 0);
+        _vote(id, alice, 1);
+
+        vm.roll(governor.proposalDeadline(id) + 1);
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IGovernor.GovernorUnexpectedProposalState.selector,
+                id,
+                IGovernor.ProposalState.Succeeded, // alice's 50e18 For cleared the 20e18 quorum
+                bytes32(1 << uint8(IGovernor.ProposalState.Active))
+            )
+        );
+        governor.castVote(id, 0);
+    }
+
+    /// @dev P3 from the prior-art pitfall registry: relaxing one-vote-per-voter re-opens the
+    ///      signature-replay surface that bit ScopeLift's Flexible Voting (weight double-counted
+    ///      by replaying a `castVoteBySig` call). Here the danger is subtler — a *stale* ballot
+    ///      replayed after the voter changed their mind would silently restore the old vote. OZ
+    ///      v5's per-account nonce forecloses it: the signature is consumed on first use.
+    function test_revote_staleSignatureCannotBeReplayedOverANewerVote() public {
+        (address signer, uint256 signerKey) = makeAddrAndKey("signer");
+        _fund(signer, 30e18);
+        vm.roll(block.number + 1);
+
+        (uint256 id,,,,) = _proposeActive(1, "sig replay", 0);
+
+        bytes memory ballotFor = _signBallot(id, 1, signer, signerKey, governor.nonces(signer));
+        governor.castVoteBySig(id, 1, signer, ballotFor);
+
+        vm.prank(signer);
+        governor.castVote(id, 0); // signer changes their mind: For -> Against
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
+        governor.castVoteBySig(id, 1, signer, ballotFor); // stale ballot must not restore the For vote
+
+        (uint256 against, uint256 for_,) = standardRuleset.proposalVotes(id);
+        assertEq(for_, 0, "the stale For vote stays gone");
+        assertEq(against, 30e18, "the standing vote is the latest one, counted once");
+    }
+
+    function _signBallot(uint256 proposalId, uint8 support, address voter, uint256 key, uint256 nonce)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash = keccak256(abi.encode(governor.BALLOT_TYPEHASH(), proposalId, support, voter, nonce));
+        (, string memory name, string memory version, uint256 chainId, address verifyingContract,,) =
+            governor.eip712Domain();
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(name)),
+                keccak256(bytes(version)),
+                chainId,
+                verifyingContract
+            )
+        );
+        (uint8 v, bytes32 r, bytes32 s) =
+            vm.sign(key, keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash)));
+        return abi.encodePacked(r, s, v);
     }
 
     // ─────────────────────── 4. Invalid support value ───────────────────────
@@ -258,7 +349,7 @@ contract GovernorNexusLifecycleTest is Test {
         (uint256 id,,,,) = _proposeActive(1, "bad support", 0);
 
         vm.prank(alice);
-        vm.expectRevert(StandardRuleset.InvalidVoteType.selector);
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
         governor.castVote(id, 3);
     }
 
@@ -317,7 +408,7 @@ contract GovernorNexusLifecycleTest is Test {
         assertEq(standardRuleset.governor(), address(governor));
 
         vm.prank(eoa);
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.Unauthorized.selector, eoa));
+        vm.expectRevert(abi.encodeWithSelector(RulesetCounting.Unauthorized.selector, eoa));
         standardRuleset.countVote(id, eoa, 1, 1_000e18, "");
     }
 }
