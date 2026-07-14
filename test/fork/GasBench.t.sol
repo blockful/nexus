@@ -7,12 +7,46 @@ import {Box, BaseTest} from "./Base.t.sol";
 import {IGov} from "./IGov.sol";
 
 /// @dev Mainnet-fork A/B gas benchmark: the LIVE ENS governor (real deployed bytecode,
-///      real token checkpoint history) vs the stock v5 scaffold on the same fork, wired
-///      to the REAL ENS token and REAL ENS timelock. Both sides run identical payloads
-///      through the same helpers, so the numbers are directly comparable.
+///      real token checkpoint history) vs GovernorNexus on the same fork, wired to the
+///      REAL ENS token and REAL ENS timelock. Both sides run identical payloads through
+///      the same helpers, so the numbers are directly comparable.
 ///
 ///      Run: forge test --match-contract GasBench -vv
 ///      (override the RPC with MAINNET_RPC_URL if the default is rate-limited)
+///
+///      Measured @ block 25445220, commit cc04973 — gas is the `gasleft()` delta around
+///      the single measured call (excludes setup/fixture cost):
+///
+///      | op      | live gov | GovernorNexus | delta   | attribution                        |
+///      |---------|---------:|--------------:|--------:|-------------------------------------|
+///      | propose |  115,052 |       102,838 | -12,214 | net cheaper despite the type-pin    |
+///      |         |          |               |         | SSTORE + transient-context writes + |
+///      |         |          |               |         | extra `ProposalTypedCreated` event — |
+///      |         |          |               |         | OZ v5's packed `ProposalCore` beats  |
+///      |         |          |               |         | the live governor's own storage     |
+///      |         |          |               |         | layout by more than that adds       |
+///      | castVote|  106,982 |       109,969 |  +2,987 | one external CALL into the pinned   |
+///      |         |          |               |         | ruleset's `countVote` (cold account |
+///      |         |          |               |         | access + its own tally SSTORE) —    |
+///      |         |          |               |         | matches the ~+2.9k expectation      |
+///      | queue   |  102,244 |       117,983 | +15,739 | `queue()`'s state-bitmap check re-  |
+///      |         |          |               |         | derives quorum/success by calling   |
+///      |         |          |               |         | out to the ruleset, which itself    |
+///      |         |          |               |         | calls back into the governor        |
+///      |         |          |               |         | (`proposalSnapshot`) and out to the |
+///      |         |          |               |         | token (`getPastTotalSupply`) — a    |
+///      |         |          |               |         | multi-hop CALL chain the live       |
+///      |         |          |               |         | governor's local tally doesn't pay  |
+///      | execute |   79,188 |        59,747 | -19,441 | net cheaper; `execute()`'s state    |
+///      |         |          |               |         | check re-runs the same ruleset CALL |
+///      |         |          |               |         | chain as queue(), so this delta's   |
+///      |         |          |               |         | sign flip is attributed to the live |
+///      |         |          |               |         | governor's own (opaque, bytecode-   |
+///      |         |          |               |         | only) execute-path bookkeeping      |
+///      |         |          |               |         | rather than anything ruleset-side   |
+///
+///      None of these are "wildly off" (the one hard expectation, castVote, lands within
+///      noise of +2.9k) — see the Task-9 report for the full writeup.
 contract GasBenchTest is BaseTest {
     // prepared in setUp (separate tx) so measured calls start from realistic cold state
     uint256 internal liveVoteId;

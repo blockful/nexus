@@ -3,19 +3,53 @@
 Production implementation of **Governor Nexus** — blockful's modular security upgrade
 for ENS governance ([RFC](https://discuss.ens.domains/t/rfc-governor-nexus-modular-security-upgrade-for-ens-governance/21942)).
 
-Current baseline: a stock OpenZeppelin v5.6.1 governor composition wired with the live
-ENS parameters, with behavioral parity against the deployed governor proven on a
-mainnet fork. Nexus mechanisms land on top of this baseline milestone by milestone.
+Current milestone (Nexus 1): `GovernorNexus`, a modular governor core that replaces a
+stock governor's baked-in settings/counting/quorum with a vote-governed registry of
+proposal types, each dispatching vote-counting to a pluggable external `IRuleset`.
+Behavioral parity against the live deployed ENS governor is proven on a mainnet fork,
+both for the bootstrap ruleset's counting semantics and for the governor's day-to-day
+surface. Nexus mechanisms continue to land milestone by milestone.
+
+## Architecture (Nexus 1)
+
+`GovernorNexus` generalizes the single hard-coded configuration of a stock governor into
+a vote-governed, append-only registry of proposal types: each type pins an external
+`IRuleset` plus its own voting delay, voting period, and proposal threshold, and once
+registered a type's ruleset and parameters never change — only its `active` flag and the
+registry's default pointer can move, both gated behind governance. Every proposal is
+pinned to exactly one type at creation, for its lifetime; the pin is looked up
+transiently (EIP-1153) only while the stock proposal-creation body runs, so the
+type-scoped delay/period never leak into externally observable state. Counting itself is
+never done by the core — `countVote`, `quorumReached`, `voteSucceeded`, and `hasVoted`
+all dispatch to the proposal's pinned ruleset, an immutable, single-purpose contract the
+DAO can swap per type without touching the governor. `StandardRuleset` is the bootstrap
+ruleset (registered as type 0, the initial default): it reproduces the live ENS
+governor's Bravo-style vote buckets (Against/For/Abstain) and fractional quorum exactly,
+so a migrated DAO sees identical outcomes until it opts into new types. Untyped surface —
+`votingDelay()`, `votingPeriod()`, `quorum()`, `COUNTING_MODE()` — reads the current
+default type's row, so the governor stays a drop-in `IGovernor` even though its real
+behavior is per-type.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/ENSGovernor.sol` | Stock OZ v5.6.1 composition, zero custom logic — the production baseline |
+| `src/GovernorNexus.sol` | Nexus 1 governor core — proposal-type registry, per-proposal pin, ruleset dispatch |
+| `src/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
+| `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity counting (Bravo buckets, fractional quorum) |
+| `src/ENSGovernor.sol` | Nexus 0 baseline (kept for reference) — stock OZ v5.6.1 composition, zero custom logic |
 | `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
-| `script/Deploy.s.sol` | Deploys the governor against the real ENS token + timelock |
-| `test/ENSGovernor.t.sol` | Unit suite (mock token, ENS-scale params) |
-| `test/fork/` | Mainnet-fork suites: behavioral parity vs the live governor + A/B gas benchmark |
+| `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
+| `test/GovernorNexus.registry.t.sol` | Unit suite: type registration, activation, default-pointer moves |
+| `test/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
+| `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
+| `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
+| `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
+| `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
+| `test/ENSGovernor.t.sol` | Unit suite for the Nexus 0 baseline (mock token, ENS-scale params) |
+| `test/Deploy.t.sol` | Unit suite for the deploy script |
+| `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `Box` test target |
+| `test/fork/` | Mainnet-fork suites: behavioral parity (live governor vs GovernorNexus) + A/B gas benchmark |
 
 ## Build & test
 
