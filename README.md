@@ -43,20 +43,21 @@ bucket before crediting the new vote, in the same call, so a voter's weight is n
 double-counted nor transiently missing. `hasVoted` therefore means "has a standing vote" and
 stays true across re-votes.
 
-Two consequences worth reading before you build on it:
+Two consequences follow for integrators:
 
-- **Indexers:** a re-vote emits another stock `VoteCast` for the same (proposal, voter). The
-  **latest one in log order is canonical** — do not sum them. `voteReceipt(proposalId, voter)`
-  returns the current standing vote directly.
+- **Indexers:** a re-vote emits another stock `VoteCast` for the same (proposal, voter); the
+  **latest one in log order is canonical** — earlier ones are superseded, not additive.
+  `voteReceipt(proposalId, voter)` returns the current standing vote directly.
 - **Tallies are non-monotonic:** quorum and success can flip in *both* directions while voting
-  is open. Nothing may arm one-shot state on a tally-crossing event — an attacker could cross a
-  threshold early, re-vote back below it, and burn a once-only trigger before the crossing that
-  matters. Mechanisms needing finality (e.g. the anti-snipe extension in Nexus 3) must evaluate
-  the outcome at the deadline, bar re-votes inside their own window, or gate early finality.
+  is open, so no consumer can arm one-shot state on a tally-crossing event — an attacker could
+  otherwise cross a threshold early, re-vote back below it, and burn a once-only trigger before
+  the crossing that matters. Mechanisms needing finality (e.g. the anti-snipe extension in
+  Nexus 3) evaluate the outcome at the deadline, bar re-votes inside their own window, or gate
+  early finality.
 - **Gasless relayers:** a direct `castVote*` spends the voter's EIP-712 nonce, so voting directly
   invalidates any of that voter's outstanding signed ballots (across all open proposals — the
-  nonce is per-account). This stops a stale pre-signed ballot from overriding a later direct vote
-  under mutable votes; relayers must re-request a signature after a voter acts directly.
+  nonce is per-account). A stale pre-signed ballot therefore cannot override a later direct vote
+  under mutable votes; a relayer needs a fresh signature once the voter acts directly.
 
 ## Layout
 
