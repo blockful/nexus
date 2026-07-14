@@ -1,0 +1,8 @@
+# Aderyn configuration — mirrors the Slither scoping philosophy
+# (slither.config.json): only src/ is analyzed; lib/, test/ and
+# script/ stay out of scope.
+version = 1
+
+# Source directory to scan. Aderyn would also derive this from
+# foundry.toml, but we pin it explicitly so the scope is documented.
+src = "src/"
