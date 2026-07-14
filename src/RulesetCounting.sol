@@ -120,16 +120,32 @@ abstract contract RulesetCounting is IRuleset {
     }
 
     /// @notice Weight standing in one support bucket of `proposalId`.
-    /// @dev Reverts `InvalidVoteType` for a support value this ruleset does not accept — there is
-    ///      no such bucket, and answering zero would read as "no votes" instead. An id this
-    ///      ruleset never counted reads as zero, never reverts. Non-monotonic under re-votes.
+    /// @dev The external, validated boundary: reverts `InvalidVoteType` for a support value this
+    ///      ruleset does not accept — there is no such bucket, and answering zero would read as
+    ///      "no votes" instead. An id this ruleset never counted reads as zero, never reverts.
+    ///      Non-monotonic under re-votes. Trusted internal callers passing a constant support
+    ///      known valid by construction use `_tally` instead, skipping the redundant check.
     function tally(uint256 proposalId, uint8 support) public view returns (uint256) {
         if (!_isValidSupport(support)) revert InvalidVoteType();
+        return _tally(proposalId, support);
+    }
+
+    /// @dev Unchecked bucket read for a ruleset reading its own declared buckets (constant support
+    ///      values, valid by construction). Keeps `_isValidSupport` off the hot outcome-evaluation
+    ///      path (`quorumReached`/`voteSucceeded` run during queue/execute); the check stays on the
+    ///      public `tally`, which is the only untrusted-input entry.
+    function _tally(uint256 proposalId, uint8 support) internal view returns (uint256) {
         return _tallies[proposalId][support];
     }
 
     /// @dev The support values this ruleset accepts. Standard/Optimistic use the three Bravo
-    ///      options; Bond adds No+Slash. Called on every cast *and* on every `tally` read, so
-    ///      keep it a pure comparison.
-    function _isValidSupport(uint8 support) internal view virtual returns (bool);
+    ///      options; Bond adds No+Slash. Declared `pure` so an override physically cannot read
+    ///      storage — a stateful check would make `tally`/`countVote` state-dependent and could
+    ///      break the unknown-id no-revert contract.
+    ///
+    ///      **Obligation:** every support value an override accepts here MUST be accounted for in
+    ///      that ruleset's `quorumReached`/`voteSucceeded`. Weight cast for an accepted-but-unread
+    ///      bucket is conserved in storage yet silently excluded from the outcome — no revert, no
+    ///      test failure unless the exact case is written. (Bond's No+Slash is the live example.)
+    function _isValidSupport(uint8 support) internal pure virtual returns (bool);
 }

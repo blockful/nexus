@@ -73,8 +73,8 @@ contract StandardRuleset is RulesetCounting {
     ///      Non-monotonic under re-votes (D16): a voter moving weight out of For/Abstain can
     ///      take a proposal back *below* quorum after it had been reached.
     function quorumReached(uint256 proposalId) external view returns (bool) {
-        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
-        uint256 abstainVotes = tally(proposalId, uint8(VoteType.Abstain));
+        uint256 forVotes = _tally(proposalId, uint8(VoteType.For));
+        uint256 abstainVotes = _tally(proposalId, uint8(VoteType.Abstain));
         uint256 snapshot = IRulesetGovernor(governor).proposalSnapshot(proposalId);
         return forVotes + abstainVotes >= quorum(snapshot);
     }
@@ -82,7 +82,7 @@ contract StandardRuleset is RulesetCounting {
     /// @inheritdoc IRuleset
     /// @dev Non-monotonic under re-votes (D16) — see `quorumReached`.
     function voteSucceeded(uint256 proposalId) external view returns (bool) {
-        return tally(proposalId, uint8(VoteType.For)) > tally(proposalId, uint8(VoteType.Against));
+        return _tally(proposalId, uint8(VoteType.For)) > _tally(proposalId, uint8(VoteType.Against));
     }
 
     /// @notice Per-bucket tally for `proposalId`, mirroring OZ `GovernorCountingSimple`'s
@@ -96,9 +96,9 @@ contract StandardRuleset is RulesetCounting {
         returns (uint256 againstVotes, uint256 forVotes, uint256 abstainVotes)
     {
         return (
-            tally(proposalId, uint8(VoteType.Against)),
-            tally(proposalId, uint8(VoteType.For)),
-            tally(proposalId, uint8(VoteType.Abstain))
+            _tally(proposalId, uint8(VoteType.Against)),
+            _tally(proposalId, uint8(VoteType.For)),
+            _tally(proposalId, uint8(VoteType.Abstain))
         );
     }
 

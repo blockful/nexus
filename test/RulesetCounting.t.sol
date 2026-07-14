@@ -351,21 +351,51 @@ contract RulesetCountingTest is Test {
     ) public {
         address[3] memory voters = [alice, bob, stranger];
 
+        // Independent oracle: reconstruct the expected tallies from the INPUT sequence, not from
+        // the contract's own receipts — so a bug that mis-stored support *consistently* with a
+        // mis-credited bucket cannot make the two agree. Each voter's standing = their latest cast.
+        uint8[3] memory latestSupport;
+        uint256[3] memory latestWeight;
+        bool[3] memory voted;
         for (uint256 i = 0; i < 16; ++i) {
-            address voter = voters[voterPicks[i] % 3];
-            _countVote(voter, supportPicks[i] % 3, weights[i]);
+            uint256 v = voterPicks[i] % 3;
+            uint8 support = supportPicks[i] % 3;
+            _countVote(voters[v], support, weights[i]);
+            latestSupport[v] = support;
+            latestWeight[v] = weights[i];
+            voted[v] = true;
         }
 
         uint256[3] memory expected;
         for (uint256 v = 0; v < 3; ++v) {
-            (bool hasVoted, uint8 support, uint256 weight) = counting.voteReceipt(PROPOSAL_ID, voters[v]);
-            if (hasVoted) expected[support] += weight;
+            if (voted[v]) expected[latestSupport[v]] += latestWeight[v];
         }
 
         (uint256 against, uint256 for_, uint256 abstain) = counting.tallies(PROPOSAL_ID);
         assertEq(against, expected[AGAINST], "against bucket == sum of standing against weights");
         assertEq(for_, expected[FOR], "for bucket == sum of standing for weights");
         assertEq(abstain, expected[ABSTAIN], "abstain bucket == sum of standing abstain weights");
+    }
+
+    /// @dev A re-vote that reverts (invalid support / weight overflow) must leave the standing vote
+    ///      untouched. Both guards run before any state write, so the EVM rolls back — this pins
+    ///      that no partial debit/credit escapes ahead of the revert.
+    function test_countVote_rejectedRevote_leavesStandingVoteIntact() public {
+        _countVote(alice, FOR, 600e18);
+
+        vm.prank(governor);
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
+        counting.countVote(PROPOSAL_ID, alice, 3, 600e18, "");
+
+        vm.prank(governor);
+        vm.expectRevert(abi.encodeWithSelector(RulesetCounting.WeightOverflow.selector, WEIGHT_LIMIT));
+        counting.countVote(PROPOSAL_ID, alice, AGAINST, WEIGHT_LIMIT, "");
+
+        assertEq(_bucketOf(PROPOSAL_ID, FOR), 600e18, "the standing For vote survives both rejected re-votes");
+        (bool voted, uint8 support, uint256 weight) = counting.voteReceipt(PROPOSAL_ID, alice);
+        assertTrue(voted);
+        assertEq(support, FOR);
+        assertEq(weight, 600e18);
     }
 
     /// @dev The F2 attack shape (D16): a tally that crosses a threshold, is re-voted back below
