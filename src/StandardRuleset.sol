@@ -28,6 +28,14 @@ interface IRulesetGovernor {
 ///      including for the quorum numerator. `countVote` is state-changing and therefore
 ///      restricted to `governor`, so third parties cannot stuff vote tallies.
 contract StandardRuleset is RulesetCounting {
+    /// @dev Bravo-style bucket ordering: 0=Against, 1=For, 2=Abstain — the three options this
+    ///      ruleset accepts (`_isValidSupport`).
+    enum VoteType {
+        Against,
+        For,
+        Abstain
+    }
+
     /// @dev Fixed at 100 so a numerator of 1 encodes 1%, matching OZ's default
     ///      `GovernorVotesQuorumFraction` denominator. Not exposed — the brief calls for no
     ///      surface beyond `IRuleset`, and this value is not overridable.
@@ -65,7 +73,8 @@ contract StandardRuleset is RulesetCounting {
     ///      Non-monotonic under re-votes (D16): a voter moving weight out of For/Abstain can
     ///      take a proposal back *below* quorum after it had been reached.
     function quorumReached(uint256 proposalId) external view returns (bool) {
-        (, uint256 forVotes, uint256 abstainVotes) = proposalVotes(proposalId);
+        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
+        uint256 abstainVotes = tally(proposalId, uint8(VoteType.Abstain));
         uint256 snapshot = IRulesetGovernor(governor).proposalSnapshot(proposalId);
         return forVotes + abstainVotes >= quorum(snapshot);
     }
@@ -73,8 +82,29 @@ contract StandardRuleset is RulesetCounting {
     /// @inheritdoc IRuleset
     /// @dev Non-monotonic under re-votes (D16) — see `quorumReached`.
     function voteSucceeded(uint256 proposalId) external view returns (bool) {
-        (uint256 againstVotes, uint256 forVotes,) = proposalVotes(proposalId);
-        return forVotes > againstVotes;
+        return tally(proposalId, uint8(VoteType.For)) > tally(proposalId, uint8(VoteType.Against));
+    }
+
+    /// @notice Per-bucket tally for `proposalId`, mirroring OZ `GovernorCountingSimple`'s
+    ///         `proposalVotes` (same name, same return order) so tooling pointed at the governor
+    ///         via `governor.proposalRuleset(id)` and then this getter just works.
+    /// @dev The Bravo-shaped view of the base's generic buckets. An id this ruleset never counted
+    ///      returns all-zero, never reverts. Non-monotonic under re-votes (D16).
+    function proposalVotes(uint256 proposalId)
+        external
+        view
+        returns (uint256 againstVotes, uint256 forVotes, uint256 abstainVotes)
+    {
+        return (
+            tally(proposalId, uint8(VoteType.Against)),
+            tally(proposalId, uint8(VoteType.For)),
+            tally(proposalId, uint8(VoteType.Abstain))
+        );
+    }
+
+    /// @dev The three Bravo options — parity with the live ENS governor's counting surface.
+    function _isValidSupport(uint8 support) internal pure override returns (bool) {
+        return support <= uint8(VoteType.Abstain);
     }
 
     /// @inheritdoc IRuleset

@@ -4,11 +4,15 @@ pragma solidity 0.8.30;
 import {IRuleset} from "./IRuleset.sol";
 
 /// @title RulesetCounting
-/// @notice Shared vote-counting mechanics for every GovernorNexus ruleset: Bravo-style buckets,
+/// @notice Shared vote-counting mechanics for every GovernorNexus ruleset: support buckets,
 ///         per-voter receipts, and **mutable votes** — re-voting while the poll is open replaces
 ///         the voter's standing vote instead of reverting (Nexus 2, D12).
-/// @dev Rules (quorum, success, counting mode) belong to the inheriting ruleset; this base owns
-///      only the arithmetic and the `onlyGovernor` trust boundary.
+/// @dev Rules (which support values exist, quorum, success, counting mode) belong to the
+///      inheriting ruleset; this base owns only the arithmetic and the `onlyGovernor` trust
+///      boundary. Buckets are keyed by the raw `support` value rather than a fixed
+///      Against/For/Abstain struct, so a ruleset with extra options — Bond's No+Slash (Nexus 8) —
+///      reuses this counting layer without a storage-layout change (D13). Which values are legal
+///      is the ruleset's call, via `_isValidSupport`.
 ///
 ///      **Non-monotonicity — read this before building on the tallies (D16).** Because a re-vote
 ///      debits the voter's previous bucket, tallies can *fall* as well as rise while voting is
@@ -23,13 +27,6 @@ import {IRuleset} from "./IRuleset.sol";
 ///      while the proposal is Active, and supplies the weight from the frozen snapshot — this
 ///      base never reads the clock and never sources weight of its own.
 abstract contract RulesetCounting is IRuleset {
-    /// @dev Bravo-style bucket ordering: 0=Against, 1=For, 2=Abstain.
-    enum VoteType {
-        Against,
-        For,
-        Abstain
-    }
-
     /// @notice A voter's standing vote on a proposal.
     /// @dev `weight` is the amount currently credited to `support`'s bucket — the debit side of a
     ///      re-vote reads it back, so it must be exact. Packed to `uint240` to fit the receipt in
@@ -41,20 +38,13 @@ abstract contract RulesetCounting is IRuleset {
         uint240 weight;
     }
 
-    /// @dev Per-proposal tally. `for_` has the trailing underscore because `for` is reserved.
-    struct ProposalVote {
-        uint256 against;
-        uint256 for_;
-        uint256 abstain;
-        mapping(address => VoteReceipt) receipts;
-    }
-
     /// @notice The single GovernorNexus this ruleset counts for; `countVote` is restricted to it.
     address public immutable governor;
 
-    mapping(uint256 => ProposalVote) private _proposalVotes;
+    mapping(uint256 proposalId => mapping(uint8 support => uint256 weight)) private _tallies;
+    mapping(uint256 proposalId => mapping(address voter => VoteReceipt)) private _receipts;
 
-    /// @notice `support` is not one of Against(0)/For(1)/Abstain(2).
+    /// @notice `support` is not a vote option this ruleset accepts.
     error InvalidVoteType();
     /// @notice `caller` is not the governor this ruleset was deployed for.
     error Unauthorized(address caller);
@@ -93,14 +83,12 @@ abstract contract RulesetCounting is IRuleset {
         onlyGovernor
         returns (uint256)
     {
-        if (support > uint8(VoteType.Abstain)) revert InvalidVoteType();
+        if (!_isValidSupport(support)) revert InvalidVoteType();
         if (weight > type(uint240).max) revert WeightOverflow(weight);
 
-        ProposalVote storage proposalVote = _proposalVotes[proposalId];
-        VoteReceipt storage receipt = proposalVote.receipts[voter];
-
-        if (receipt.hasVoted) _debit(proposalVote, receipt.support, receipt.weight);
-        _credit(proposalVote, support, weight);
+        VoteReceipt storage receipt = _receipts[proposalId][voter];
+        if (receipt.hasVoted) _tallies[proposalId][receipt.support] -= receipt.weight;
+        _tallies[proposalId][support] += weight;
 
         receipt.hasVoted = true;
         receipt.support = support;
@@ -115,7 +103,7 @@ abstract contract RulesetCounting is IRuleset {
     ///      many times did they cast". Never reverts on an id this ruleset never counted
     ///      (empty-receipt default, `false`), per the interface contract pinned in Nexus 1.
     function hasVoted(uint256 proposalId, address voter) public view returns (bool) {
-        return _proposalVotes[proposalId].receipts[voter].hasVoted;
+        return _receipts[proposalId][voter].hasVoted;
     }
 
     /// @notice `voter`'s standing vote on `proposalId`: whether one exists, its support bucket,
@@ -127,43 +115,21 @@ abstract contract RulesetCounting is IRuleset {
         view
         returns (bool voted, uint8 support, uint256 weight)
     {
-        VoteReceipt storage receipt = _proposalVotes[proposalId].receipts[voter];
+        VoteReceipt storage receipt = _receipts[proposalId][voter];
         return (receipt.hasVoted, receipt.support, receipt.weight);
     }
 
-    /// @notice Per-bucket tally for `proposalId`, mirroring OZ `GovernorCountingSimple`'s
-    ///         `proposalVotes` (same name, same return order).
-    /// @dev Non-monotonic under re-votes (see the contract-level note). An id this ruleset never
-    ///      counted returns all-zero, never reverts.
-    function proposalVotes(uint256 proposalId)
-        public
-        view
-        returns (uint256 againstVotes, uint256 forVotes, uint256 abstainVotes)
-    {
-        ProposalVote storage proposalVote = _proposalVotes[proposalId];
-        return (proposalVote.against, proposalVote.for_, proposalVote.abstain);
+    /// @notice Weight standing in one support bucket of `proposalId`.
+    /// @dev Reverts `InvalidVoteType` for a support value this ruleset does not accept — there is
+    ///      no such bucket, and answering zero would read as "no votes" instead. An id this
+    ///      ruleset never counted reads as zero, never reverts. Non-monotonic under re-votes.
+    function tally(uint256 proposalId, uint8 support) public view returns (uint256) {
+        if (!_isValidSupport(support)) revert InvalidVoteType();
+        return _tallies[proposalId][support];
     }
 
-    /// @dev Removes a standing vote's weight from its bucket — the first half of a re-vote.
-    ///      Cannot underflow: it removes exactly the weight this voter's receipt says is credited
-    ///      to that bucket, and checked arithmetic would revert if that invariant ever broke.
-    function _debit(ProposalVote storage proposalVote, uint8 support, uint256 weight) private {
-        if (support == uint8(VoteType.Against)) {
-            proposalVote.against -= weight;
-        } else if (support == uint8(VoteType.For)) {
-            proposalVote.for_ -= weight;
-        } else {
-            proposalVote.abstain -= weight;
-        }
-    }
-
-    function _credit(ProposalVote storage proposalVote, uint8 support, uint256 weight) private {
-        if (support == uint8(VoteType.Against)) {
-            proposalVote.against += weight;
-        } else if (support == uint8(VoteType.For)) {
-            proposalVote.for_ += weight;
-        } else {
-            proposalVote.abstain += weight;
-        }
-    }
+    /// @dev The support values this ruleset accepts. Standard/Optimistic use the three Bravo
+    ///      options; Bond adds No+Slash. Called on every cast *and* on every `tally` read, so
+    ///      keep it a pure comparison.
+    function _isValidSupport(uint8 support) internal view virtual returns (bool);
 }

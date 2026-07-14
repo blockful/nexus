@@ -11,10 +11,14 @@ import {RulesetCounting} from "../src/RulesetCounting.sol";
 contract CountingHarness is RulesetCounting {
     constructor(address governor_) RulesetCounting(governor_) {}
 
-    /// @dev Exposes the tally accessor under a distinct name so tests read buckets without
-    ///      colliding with the `proposalVotes` the base already exposes.
+    /// @dev The three Bravo options, as StandardRuleset defines them.
+    function _isValidSupport(uint8 support) internal pure override returns (bool) {
+        return support <= 2;
+    }
+
+    /// @dev All three buckets at once, so tests can assert conservation in one read.
     function tallies(uint256 proposalId) external view returns (uint256, uint256, uint256) {
-        return proposalVotes(proposalId);
+        return (tally(proposalId, 0), tally(proposalId, 1), tally(proposalId, 2));
     }
 
     // Rule stubs — not under test here; the rules live in the concrete rulesets.
@@ -34,6 +38,40 @@ contract CountingHarness is RulesetCounting {
     // solhint-disable-next-line func-name-mixedcase
     function COUNTING_MODE() external pure returns (string memory) {
         return "support=bravo&quorum=for,abstain";
+    }
+
+    function supportsInterface(bytes4) external pure returns (bool) {
+        return false;
+    }
+}
+
+/// @dev A ruleset with a FOURTH option, standing in for Nexus 8's Bond ruleset (No+Slash).
+///      The base must count it without a storage-layout change — otherwise "the counting layer
+///      every ruleset shares" (D13) is only true for the three-bucket rulesets.
+contract FourOptionHarness is RulesetCounting {
+    uint8 internal constant NO_AND_SLASH = 3;
+
+    constructor(address governor_) RulesetCounting(governor_) {}
+
+    function _isValidSupport(uint8 support) internal pure override returns (bool) {
+        return support <= NO_AND_SLASH;
+    }
+
+    function quorumReached(uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function voteSucceeded(uint256) external pure returns (bool) {
+        return false;
+    }
+
+    function quorum(uint256) external pure returns (uint256) {
+        return 0;
+    }
+
+    // solhint-disable-next-line func-name-mixedcase
+    function COUNTING_MODE() external pure returns (string memory) {
+        return "support=bravo,slash&quorum=for,abstain";
     }
 
     function supportsInterface(bytes4) external pure returns (bool) {
@@ -220,6 +258,30 @@ contract RulesetCountingTest is Test {
         counting.countVote(PROPOSAL_ID, alice, FOR, WEIGHT_LIMIT, "");
     }
 
+    // ─────────────────────────── Per-support tally (frozen vector surface) ───────────────────────────
+
+    /// @dev `tally(id, support)` is the accessor the frozen differential-vector ABI requires
+    ///      (spec v1 §4, `IStandardRulesetVector`). It reads the same buckets as `proposalVotes`,
+    ///      one at a time, which is what the tally-conservation vectors iterate over.
+    function test_tally_readsTheSameBucketsAsProposalVotes() public {
+        _countVote(alice, AGAINST, 600e18);
+        _countVote(bob, FOR, 350e18);
+
+        assertEq(counting.tally(PROPOSAL_ID, AGAINST), 600e18);
+        assertEq(counting.tally(PROPOSAL_ID, FOR), 350e18);
+        assertEq(counting.tally(PROPOSAL_ID, ABSTAIN), 0);
+
+        (uint256 against, uint256 for_, uint256 abstain) = counting.tallies(PROPOSAL_ID);
+        assertEq(counting.tally(PROPOSAL_ID, AGAINST), against);
+        assertEq(counting.tally(PROPOSAL_ID, FOR), for_);
+        assertEq(counting.tally(PROPOSAL_ID, ABSTAIN), abstain);
+    }
+
+    function test_tally_revertsOnInvalidSupport() public {
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
+        counting.tally(PROPOSAL_ID, 3);
+    }
+
     // ─────────────────────────── Unknown-id contract (Nexus 1 §4.5) ───────────────────────────
 
     function test_views_unknownProposalId_neverRevert() public view {
@@ -245,6 +307,35 @@ contract RulesetCountingTest is Test {
         assertFalse(hasVoted);
         assertEq(support, 0);
         assertEq(weight, 0);
+    }
+
+    // ─────────────────────────── Extra support options (D13 — Bond, Nexus 8) ───────────────────────────
+
+    /// @dev The base must carry a ruleset that defines more than the three Bravo options: Bond
+    ///      (Nexus 8, frozen scope) adds No+Slash as support=3. A re-vote *into* the extra bucket
+    ///      must conserve the tally exactly as the three-option case does.
+    function test_extraSupportOption_countsAndConservesOnRevote() public {
+        FourOptionHarness bond = new FourOptionHarness(governor);
+        uint8 noAndSlash = 3;
+
+        vm.prank(governor);
+        bond.countVote(PROPOSAL_ID, alice, FOR, 600e18, "");
+        vm.prank(governor);
+        bond.countVote(PROPOSAL_ID, alice, noAndSlash, 600e18, ""); // re-vote into the 4th bucket
+
+        assertEq(bond.tally(PROPOSAL_ID, FOR), 0, "the For bucket was debited");
+        assertEq(bond.tally(PROPOSAL_ID, noAndSlash), 600e18, "the extra bucket holds the standing vote");
+
+        (, uint8 support,) = bond.voteReceipt(PROPOSAL_ID, alice);
+        assertEq(support, noAndSlash);
+    }
+
+    /// @dev Each ruleset still owns which options it accepts: the three-option harness must
+    ///      reject the support value the Bond-like one accepts.
+    function test_extraSupportOption_isPerRulesetNotGlobal() public {
+        vm.prank(governor);
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
+        counting.countVote(PROPOSAL_ID, alice, 3, 600e18, "");
     }
 
     // ─────────────────────────── Tally conservation (fuzz) ───────────────────────────
