@@ -79,6 +79,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
+    /// @notice `castVoteBatch` was called with zero items.
+    error EmptyBatch();
+    /// @notice `castVoteBatch` array arguments have different lengths.
+    error BatchLengthMismatch();
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
     ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
@@ -403,6 +407,36 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     {
         _useNonce(_msgSender());
         return super.castVoteWithReasonAndParams(proposalId, support, reason, params);
+    }
+
+    // ─────────────────────────── Batch voting (Nexus 6) ───────────────────────────
+
+    /// @notice Casts votes on several proposals in one transaction (RFC §2.3, spec D27).
+    /// @dev All-or-nothing: any failing item reverts the whole batch (D29). Duplicate ids are
+    ///      valid intra-tx re-votes under mutable votes, last-wins (D32). Empty `reasons[i]` /
+    ///      `params[i]` entries mean "none" — OZ emits `VoteCast` for empty params and
+    ///      `VoteCastWithParams` otherwise. Explicit function rather than `Multicall` (D31):
+    ///      the governor's payable surface (`execute`/`relay`/`receive`) makes Multicall the
+    ///      msg.value-reuse bug class; if a trusted forwarder is ever added, revisit this
+    ///      entry point.
+    function castVoteBatch(
+        uint256[] calldata proposalIds,
+        uint8[] calldata supportValues,
+        string[] calldata reasons,
+        bytes[] calldata params
+    ) public virtual returns (uint256[] memory weights) {
+        uint256 n = proposalIds.length;
+        if (n == 0) revert EmptyBatch();
+        if (n != supportValues.length || n != reasons.length || n != params.length) {
+            revert BatchLengthMismatch();
+        }
+
+        address voter = _msgSender();
+
+        weights = new uint256[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            weights[i] = _castVote(proposalIds[i], voter, supportValues[i], reasons[i], params[i]);
+        }
     }
 
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
