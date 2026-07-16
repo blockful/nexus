@@ -6,6 +6,8 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {Box} from "./mocks/Box.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
+import {RulesetCounting} from "../src/RulesetCounting.sol";
+import {StandardRuleset} from "../src/StandardRuleset.sol";
 
 /// @dev Batch voting suite (Nexus 6, DEV-1002 — spec D27–D32). Extends the shared base:
 ///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter so every weight
@@ -213,5 +215,57 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(standardRuleset.tally(p1, 1), 0, "single For debited by the batched re-vote");
         assertEq(standardRuleset.tally(p1, 0), 30e18, "batched Against stands");
         assertEq(standardRuleset.tally(p2, 1), 30e18, "fresh vote lands");
+    }
+
+    // ─────────────────────── 5. All-or-nothing (D29) ───────────────────────
+
+    /// @dev One dead id (canceled between signing and inclusion) reverts the other item
+    ///      too — no partial state. Recovery is resending without the dead id (idempotent
+    ///      under mutable votes).
+    function test_castVoteBatch_canceledItemRevertsWholeBatch() public {
+        uint256 p1 = _proposeActive(1, "survives", 0);
+
+        // p2 stays Pending so the proposer can still cancel it (stock OZ rule).
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _boxCall(2, "canceled");
+        vm.prank(alice);
+        uint256 p2 = governor.propose(t, v, c, "canceled");
+        vm.prank(alice);
+        governor.cancel(t, v, c, h);
+        vm.roll(governor.proposalSnapshot(p2) + 1); // p1 and p2 share timing; p1 active
+
+        vm.prank(carol);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IGovernor.GovernorUnexpectedProposalState.selector,
+                p2,
+                IGovernor.ProposalState.Canceled,
+                bytes32(uint256(1) << uint8(IGovernor.ProposalState.Active))
+            )
+        );
+        governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
+
+        assertEq(standardRuleset.tally(p1, 1), 0, "no partial state: p1 vote rolled back");
+        assertFalse(governor.hasVoted(p1, carol));
+    }
+
+    /// @dev Support validity is per-ruleset (_isValidSupport). A support value invalid for
+    ///      one item's ruleset reverts the whole batch, including items whose support was
+    ///      fine for THEIR ruleset.
+    function test_castVoteBatch_mixedRulesets_invalidSupportRevertsAll() public {
+        StandardRuleset rs1 = _newRuleset();
+        _executeSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (rs1, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD)),
+            "register type 1"
+        );
+
+        uint256 p0 = _proposeActive(1, "type 0", 0);
+        uint256 p1 = _proposeActive(2, "type 1", 1);
+
+        vm.prank(carol);
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
+        governor.castVoteBatch(_ids(p0, p1), _supports(1, 3), _reasons("", ""), _params("", ""));
+
+        assertEq(standardRuleset.tally(p0, 1), 0, "valid item rolled back with the batch");
+        assertEq(rs1.tally(p1, 1), 0);
     }
 }
