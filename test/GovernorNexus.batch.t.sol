@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
+import {console2} from "forge-std/console2.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {Box} from "./mocks/Box.sol";
@@ -288,5 +289,97 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         assertEq(standardRuleset.tally(p1, 1), 30e18);
         assertEq(standardRuleset.tally(p2, 1), 30e18, "params ignored by StandardRuleset counting");
+    }
+
+    // ─────────────────────── 7. Equivalence fuzz + gas ───────────────────────
+
+    /// @dev State equivalence: a batch lands exactly the tallies a sequence of single
+    ///      casts lands (same voter, same order). Includes duplicate ids (re-votes) and
+    ///      the full support range via bounding.
+    function testFuzz_castVoteBatch_equivalentToSingleCastSequence(uint8 s0, uint8 s1, uint8 s2, bool duplicate)
+        public
+    {
+        s0 = uint8(bound(s0, 0, 2));
+        s1 = uint8(bound(s1, 0, 2));
+        s2 = uint8(bound(s2, 0, 2));
+
+        uint256 p1 = _proposeActive(1, "fuzz A", 0);
+        uint256 p2 = _proposeActive(2, "fuzz B", 0);
+
+        uint256[] memory ids = new uint256[](3);
+        ids[0] = p1;
+        ids[1] = p2;
+        ids[2] = duplicate ? p1 : p2; // third item re-votes one of the two
+        uint8[] memory supportValues = new uint8[](3);
+        supportValues[0] = s0;
+        supportValues[1] = s1;
+        supportValues[2] = s2;
+        string[] memory reasons = new string[](3);
+        bytes[] memory params = new bytes[](3);
+
+        uint256 snap = vm.snapshotState();
+
+        vm.prank(carol);
+        governor.castVoteBatch(ids, supportValues, reasons, params);
+        uint256[6] memory batchTallies = _tallies(p1, p2);
+
+        vm.revertToState(snap);
+
+        for (uint256 i = 0; i < 3; ++i) {
+            vm.prank(carol);
+            governor.castVote(ids[i], supportValues[i]);
+        }
+        uint256[6] memory singleTallies = _tallies(p1, p2);
+
+        for (uint256 i = 0; i < 6; ++i) {
+            assertEq(batchTallies[i], singleTallies[i], "batch != sequence of singles");
+        }
+    }
+
+    function _tallies(uint256 p1, uint256 p2) internal view returns (uint256[6] memory t) {
+        for (uint8 s = 0; s <= 2; ++s) {
+            t[s] = standardRuleset.tally(p1, s);
+            t[3 + s] = standardRuleset.tally(p2, s);
+        }
+    }
+
+    /// @dev In-EVM gas comparison for the verdict. The batch saves (N-1) nonce bumps (D30
+    ///      vs D21-per-single) in-EVM, but the measured in-EVM delta can be slightly
+    ///      negative (array ABI-decoding overhead can exceed those saved nonce bumps) — the
+    ///      assertion below is intrinsic-adjusted, crediting the (N-1) avoided per-tx 21k
+    ///      intrinsic costs that a single-EVM-call harness cannot otherwise see. Real-world
+    ///      savings (avoided top-level calldata too) are larger than reported here.
+    function test_castVoteBatch_gasComparedToSingles() public {
+        uint256[] memory ids = new uint256[](5);
+        uint8[] memory supportValues = new uint8[](5);
+        string[] memory reasons = new string[](5);
+        bytes[] memory params = new bytes[](5);
+        for (uint256 i = 0; i < 5; ++i) {
+            ids[i] = _proposeActive(i + 1, string(abi.encodePacked("gas ", bytes1(uint8(0x30 + i)))), 0);
+            supportValues[i] = 1;
+        }
+
+        uint256 snap = vm.snapshotState();
+        vm.prank(carol);
+        uint256 g0 = gasleft();
+        governor.castVoteBatch(ids, supportValues, reasons, params);
+        uint256 batchGas = g0 - gasleft();
+        vm.revertToState(snap);
+
+        uint256 singlesGas;
+        for (uint256 i = 0; i < 5; ++i) {
+            vm.prank(carol);
+            g0 = gasleft();
+            governor.castVote(ids[i], 1);
+            singlesGas += g0 - gasleft();
+        }
+
+        console2.log("batch(5) gas:", batchGas);
+        console2.log("5 singles gas:", singlesGas);
+        // In-EVM, a batch can cost slightly MORE than N singles (array ABI-decoding overhead
+        // exceeds the (N-1) saved nonce bumps). The real saving is off-EVM: (N-1) avoided
+        // per-tx intrinsic costs (21k each) + top-level calldata. Assert the real-world win
+        // with the intrinsic adjustment; exact numbers go to the milestone verdict.
+        assertLt(batchGas, singlesGas + 4 * 21_000, "batch must beat 5 singles once avoided intrinsic gas is counted");
     }
 }
