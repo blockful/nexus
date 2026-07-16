@@ -433,6 +433,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
 
         address voter = _msgSender();
 
+        // A batch is a direct cast — spend the voter's nonce once so it invalidates any
+        // outstanding signed ballot (D30; account-global, so once per batch suffices — D21).
+        _useNonce(voter);
+
         weights = new uint256[](n);
         for (uint256 i = 0; i < n; ++i) {
             weights[i] = _castVote(proposalIds[i], voter, supportValues[i], reasons[i], params[i]);

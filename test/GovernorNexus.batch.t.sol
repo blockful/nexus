@@ -118,4 +118,57 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         vm.prank(carol);
         governor.castVoteBatch(new uint256[](2), new uint8[](2), new string[](2), new bytes[](1));
     }
+
+    // ─────────────────────────── 3. Nonce spend (D30) ───────────────────────────
+
+    /// @dev A batch is a direct cast: it must invalidate the voter's outstanding signed
+    ///      ballots, exactly like the single-vote D21 overrides. Without this, the batch
+    ///      path reopens the Nexus 2 audit-panel Medium (stale relayer ballot overriding a
+    ///      later direct vote).
+    function test_castVoteBatch_invalidatesOutstandingSignedBallot() public {
+        (address signer, uint256 signerKey) = makeAddrAndKey("signer");
+        _fund(signer, 30e18);
+        vm.roll(block.number + 1);
+
+        uint256 p1 = _proposeActive(1, "batched direct vote", 0);
+        uint256 p2 = _proposeActive(2, "held ballot", 0);
+
+        // Signer hands a relayer a For ballot on p2, then changes their mind and
+        // batch-votes (on p1 only — the nonce is account-global, D21).
+        bytes memory pendingFor = _signBallot(p2, 1, signer, signerKey, governor.nonces(signer));
+
+        uint256[] memory ids = new uint256[](1);
+        ids[0] = p1;
+        uint8[] memory supportValues = new uint8[](1);
+        string[] memory reasons = new string[](1);
+        bytes[] memory params = new bytes[](1);
+        vm.prank(signer);
+        governor.castVoteBatch(ids, supportValues, reasons, params);
+
+        // The outstanding ballot died with the batch.
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
+        governor.castVoteBySig(p2, 1, signer, pendingFor);
+    }
+
+    function _signBallot(uint256 proposalId, uint8 support, address voter, uint256 key, uint256 nonce)
+        internal
+        view
+        returns (bytes memory)
+    {
+        bytes32 structHash = keccak256(abi.encode(governor.BALLOT_TYPEHASH(), proposalId, support, voter, nonce));
+        (, string memory name, string memory version, uint256 chainId, address verifyingContract,,) =
+            governor.eip712Domain();
+        bytes32 domainSeparator = keccak256(
+            abi.encode(
+                keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
+                keccak256(bytes(name)),
+                keccak256(bytes(version)),
+                chainId,
+                verifyingContract
+            )
+        );
+        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
+        return abi.encodePacked(r, s, v);
+    }
 }
