@@ -62,7 +62,8 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2
         );
     }
 
@@ -75,14 +76,15 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             IRuleset(address(0)),
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2
         );
     }
 
     function test_constructor_revertsOnZeroVotingPeriod() public {
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
         new GovernorNexus(
-            "GovernorNexus", IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD
+            "GovernorNexus", IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD, 2
         );
     }
 
@@ -96,7 +98,8 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             IRuleset(address(notRuleset)),
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2
         );
     }
 

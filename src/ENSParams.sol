@@ -13,6 +13,9 @@ library ENSParams {
     uint48 internal constant VOTING_DELAY = 1; // blocks
     uint32 internal constant VOTING_PERIOD = 45_818; // blocks (~1 week)
     uint256 internal constant PROPOSAL_THRESHOLD = 100_000e18; // 100k ENS
+    // Not read from the live governor (it has no such mechanism): RFC-pinned per-proposer
+    // cap on concurrently live proposals (Nexus 4 spec D22-D24).
+    uint8 internal constant MAX_ACTIVE_PROPOSALS = 2;
     // Live governor expresses quorum as 100/10000; OZ v5's default denominator is 100,
     // so numerator 1 encodes the same 1%. Parity is asserted on quorum() output, which
     // is denominator-independent.

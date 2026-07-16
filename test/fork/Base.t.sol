@@ -52,7 +52,8 @@ abstract contract BaseTest is Test {
             standardRuleset,
             ENSParams.VOTING_DELAY,
             ENSParams.VOTING_PERIOD,
-            ENSParams.PROPOSAL_THRESHOLD
+            ENSParams.PROPOSAL_THRESHOLD,
+            ENSParams.MAX_ACTIVE_PROPOSALS
         );
         require(address(scaffold) == predictedGovernor, "scaffold governor address prediction failed");
         scaffoldGov = IGov(address(scaffold));

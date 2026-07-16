@@ -66,7 +66,8 @@ contract GovernorNexusLifecycleTest is Test {
             standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 

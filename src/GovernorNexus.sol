@@ -44,6 +44,21 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
 
+    /// @dev Ids of the proposer's tracked proposals, lazily pruned of entries that left
+    ///      Pending|Active on the proposer's next propose (spec D22). Invariant-bounded:
+    ///      an id is pushed only after {_pruneAndCheckActiveLimit} passes, so length can
+    ///      never exceed `_maxActiveProposals` — propose gas is O(cap), independent of
+    ///      global state, and no entry exists for an address that never proposed.
+    mapping(address proposer => uint256[] proposalIds) private _activeProposals;
+
+    /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals (spec D22-D24).
+    uint8 private _maxActiveProposals;
+
+    /// @notice Hard ceiling `setMaxActiveProposals` can never exceed (spec D24). Bounds the
+    ///         propose-time prune to at most 10 `state()` reads; a per-key cap above 10 is
+    ///         no longer meaningfully a spam limit and warrants an upgrade instead.
+    uint8 public constant MAX_ACTIVE_PROPOSALS_CEILING = 10;
+
     /// @dev Transaction-scoped propose-time type context (EIP-1153 transient storage, spec
     ///      D10). Holds `typeId + 1` only while `_proposeWithType` runs `super._propose`, so
     ///      `votingDelay()`/`votingPeriod()` serve the typed line values to the stock
@@ -63,6 +78,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     event TypeActiveSet(uint8 indexed typeId, bool active);
     /// @notice The default type pointer moved.
     event DefaultTypeSet(uint8 indexed typeId);
+    /// @notice The per-proposer live-proposal cap was set.
+    event MaxActiveProposalsSet(uint8 maxActiveProposals);
     /// @notice A proposal was created and pinned to `typeId` (companion to the stock
     ///         `ProposalCreated`, emitted in the same call).
     event ProposalTypedCreated(uint256 indexed proposalId, uint8 indexed typeId, IRuleset indexed ruleset);
@@ -79,6 +96,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
+    /// @notice `proposer` already has `maxActiveProposals` live (Pending|Active) proposals.
+    error ProposerActiveLimitReached(address proposer, uint8 maxActiveProposals);
+    /// @notice The cap is zero (bricks every propose, spec D24) or above the ceiling.
+    error InvalidMaxActiveProposals(uint8 maxActiveProposals);
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
     ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
@@ -90,6 +111,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @param votingDelay_ Bootstrap type voting delay.
     /// @param votingPeriod_ Bootstrap type voting period; must be non-zero.
     /// @param proposalThreshold_ Bootstrap type proposal threshold.
+    /// @param maxActiveProposals_ Per-proposer live-proposal cap (RFC deploy value: 2);
+    ///        `1..MAX_ACTIVE_PROPOSALS_CEILING`, enforced by the same guard as the setter.
     /// @dev Registers row 0 under the same guardrails as `registerType` and sets it as the
     ///      default, atomically. No deployer-privileged post-deploy setup exists.
     constructor(
@@ -99,10 +122,12 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         IRuleset standardRuleset,
         uint48 votingDelay_,
         uint32 votingPeriod_,
-        uint256 proposalThreshold_
+        uint256 proposalThreshold_,
+        uint8 maxActiveProposals_
     ) Governor(name_) GovernorVotes(token) GovernorTimelockControl(timelock) {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
+        _setMaxActiveProposals(maxActiveProposals_);
     }
 
     // ─────────────────────────── Type registry ───────────────────────────
@@ -139,6 +164,24 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         if (!_types[typeId].active) revert TypeInactive(typeId);
         defaultTypeId = typeId;
         emit DefaultTypeSet(typeId);
+    }
+
+    /// @notice Set the per-proposer live-proposal cap.
+    /// @param maxActiveProposals_ New cap; `1..MAX_ACTIVE_PROPOSALS_CEILING`.
+    function setMaxActiveProposals(uint8 maxActiveProposals_) external onlyGovernance {
+        _setMaxActiveProposals(maxActiveProposals_);
+    }
+
+    /// @dev Shared by the constructor and {setMaxActiveProposals} so the guard cannot drift.
+    ///      Zero is rejected because `length >= 0` holds for every proposer — every propose
+    ///      (including the governance proposal needed to raise the cap back) would revert
+    ///      forever: the self-brick class catalogued in the Nexus 1 research (spec D24).
+    function _setMaxActiveProposals(uint8 maxActiveProposals_) private {
+        if (maxActiveProposals_ == 0 || maxActiveProposals_ > MAX_ACTIVE_PROPOSALS_CEILING) {
+            revert InvalidMaxActiveProposals(maxActiveProposals_);
+        }
+        _maxActiveProposals = maxActiveProposals_;
+        emit MaxActiveProposalsSet(maxActiveProposals_);
     }
 
     /// @dev Single registration path shared by the constructor and `registerType`, so
@@ -265,12 +308,70 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         address proposer,
         uint8 typeId
     ) internal virtual returns (uint256 proposalId) {
+        // Spam limit (spec D22): check-then-record inside the single ProposalCore-writing
+        // chokepoint, so no creation door — present or future — can miss either half.
+        _pruneAndCheckActiveLimit(proposer);
+
         _typeContext = uint16(typeId) + 1;
         proposalId = super._propose(targets, values, calldatas, description, proposer);
         _typeContext = 0;
 
         _proposalType[proposalId] = typeId;
+        _activeProposals[proposer].push(proposalId);
         emit ProposalTypedCreated(proposalId, typeId, _types[typeId].ruleset);
+    }
+
+    // ─────────────────────────── Spam limit (spec D22-D24) ───────────────────────────
+
+    /// @dev Drops every tracked id that left the live set, then enforces the cap. The live
+    ///      set is a positive whitelist — `Pending` or `Active`, nothing else (spec D23):
+    ///      `Queued` already survived the vote and `Canceled`/`Defeated`/`Executed` free
+    ///      their slot immediately, so this is a concurrency cap, not a rate limit. New
+    ///      lifecycle states fail closed (they do not occupy a slot) until D23 is revisited.
+    function _pruneAndCheckActiveLimit(address proposer) private {
+        uint256[] storage ids = _activeProposals[proposer];
+        uint256 length = ids.length;
+        uint256 i = 0;
+        while (i < length) {
+            if (_isLive(ids[i])) {
+                ++i;
+            } else {
+                ids[i] = ids[length - 1];
+                ids.pop();
+                --length;
+            }
+        }
+        if (length >= _maxActiveProposals) {
+            revert ProposerActiveLimitReached(proposer, _maxActiveProposals);
+        }
+    }
+
+    /// @dev Liveness probe that can never reach a ruleset (spec D26). Past the deadline the
+    ///      proposal cannot be Pending|Active, so it is settled on `proposalDeadline` alone —
+    ///      `state()` is consulted only within the deadline, where its OZ v5.6.1 ordering
+    ///      resolves purely from core storage (Executed/Canceled flags, snapshot, deadline)
+    ///      and dispatches to `_quorumReached`/`_voteSucceeded` only in the branch this probe
+    ///      never takes. A ruleset with poisoned views therefore cannot brick its proposer's
+    ///      next propose (pinned by the adversarial suite's containment property).
+    function _isLive(uint256 proposalId) private view returns (bool) {
+        if (proposalDeadline(proposalId) < clock()) return false;
+        ProposalState s = state(proposalId);
+        return s == ProposalState.Pending || s == ProposalState.Active;
+    }
+
+    /// @notice Current per-proposer live-proposal cap.
+    function maxActiveProposals() public view returns (uint8) {
+        return _maxActiveProposals;
+    }
+
+    /// @notice Number of `proposer`'s proposals currently Pending|Active. Filters the
+    ///         tracked set by liveness, so ids awaiting their lazy prune are never counted.
+    function activeProposalCount(address proposer) external view returns (uint256 count) {
+        uint256[] storage ids = _activeProposals[proposer];
+        uint256 length = ids.length;
+        for (uint256 i = 0; i < length; ++i) {
+            if (_isLive(ids[i])) ++count;
+        }
     }
 
     // ─────────────────────── Default-type settings views ───────────────────────
