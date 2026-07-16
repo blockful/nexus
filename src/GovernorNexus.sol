@@ -45,16 +45,16 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     mapping(uint256 proposalId => uint8) private _proposalType;
 
     /// @dev Ids of the proposer's tracked proposals, lazily pruned of entries that left
-    ///      Pending|Active on the proposer's next propose (spec D22). Invariant-bounded:
-    ///      an id is pushed only after {_pruneAndCheckActiveLimit} passes, so length can
-    ///      never exceed `_maxActiveProposals` — propose gas is O(cap), independent of
-    ///      global state, and no entry exists for an address that never proposed.
+    ///      Pending|Active on the proposer's next propose. Invariant-bounded: an id is
+    ///      pushed only after {_pruneAndCheckActiveLimit} passes, so length can never
+    ///      exceed `_maxActiveProposals` — propose gas is O(cap), independent of global
+    ///      state, and no entry exists for an address that never proposed.
     mapping(address proposer => uint256[] proposalIds) private _activeProposals;
 
-    /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals (spec D22-D24).
+    /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals.
     uint8 private _maxActiveProposals;
 
-    /// @notice Hard ceiling `setMaxActiveProposals` can never exceed (spec D24). Bounds the
+    /// @notice Hard ceiling `setMaxActiveProposals` can never exceed. Bounds the
     ///         propose-time prune to at most 10 `state()` reads; a per-key cap above 10 is
     ///         no longer meaningfully a spam limit and warrants an upgrade instead.
     uint8 public constant MAX_ACTIVE_PROPOSALS_CEILING = 10;
@@ -98,7 +98,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error TypeInactive(uint8 typeId);
     /// @notice `proposer` already has `maxActiveProposals` live (Pending|Active) proposals.
     error ProposerActiveLimitReached(address proposer, uint8 maxActiveProposals);
-    /// @notice The cap is zero (bricks every propose, spec D24) or above the ceiling.
+    /// @notice The cap is zero (bricks every propose) or above the ceiling.
     error InvalidMaxActiveProposals(uint8 maxActiveProposals);
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
@@ -175,7 +175,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Shared by the constructor and {setMaxActiveProposals} so the guard cannot drift.
     ///      Zero is rejected because `length >= 0` holds for every proposer — every propose
     ///      (including the governance proposal needed to raise the cap back) would revert
-    ///      forever: the self-brick class catalogued in the Nexus 1 research (spec D24).
+    ///      forever.
     function _setMaxActiveProposals(uint8 maxActiveProposals_) private {
         if (maxActiveProposals_ == 0 || maxActiveProposals_ > MAX_ACTIVE_PROPOSALS_CEILING) {
             revert InvalidMaxActiveProposals(maxActiveProposals_);
@@ -308,8 +308,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         address proposer,
         uint8 typeId
     ) internal virtual returns (uint256 proposalId) {
-        // Spam limit (spec D22): check-then-record inside the single ProposalCore-writing
-        // chokepoint, so no creation door — present or future — can miss either half.
+        // Check-then-record inside the single ProposalCore-writing chokepoint, so no
+        // creation door — present or future — can miss either half.
         _pruneAndCheckActiveLimit(proposer);
 
         _typeContext = uint16(typeId) + 1;
@@ -321,13 +321,14 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         emit ProposalTypedCreated(proposalId, typeId, _types[typeId].ruleset);
     }
 
-    // ─────────────────────────── Spam limit (spec D22-D24) ───────────────────────────
+    // ─────────────────────────── Spam limit ───────────────────────────
 
     /// @dev Drops every tracked id that left the live set, then enforces the cap. The live
-    ///      set is a positive whitelist — `Pending` or `Active`, nothing else (spec D23):
-    ///      `Queued` already survived the vote and `Canceled`/`Defeated`/`Executed` free
-    ///      their slot immediately, so this is a concurrency cap, not a rate limit. New
-    ///      lifecycle states fail closed (they do not occupy a slot) until D23 is revisited.
+    ///      set is a positive whitelist — `Pending` or `Active`, nothing else: `Queued`
+    ///      already survived the vote and `Canceled`/`Defeated`/`Executed` free their slot
+    ///      immediately, so this is a concurrency cap, not a rate limit. New lifecycle
+    ///      states fail closed (they do not occupy a slot) — revisit this whitelist if the
+    ///      proposal lifecycle ever grows new states.
     function _pruneAndCheckActiveLimit(address proposer) private {
         uint256[] storage ids = _activeProposals[proposer];
         uint256 length = ids.length;
@@ -346,7 +347,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         }
     }
 
-    /// @dev Liveness probe that can never reach a ruleset (spec D26). Past the deadline the
+    /// @dev Liveness probe that can never reach a ruleset. Past the deadline the
     ///      proposal cannot be Pending|Active, so it is settled on `proposalDeadline` alone —
     ///      `state()` is consulted only within the deadline, where its OZ v5.6.1 ordering
     ///      resolves purely from core storage (Executed/Canceled flags, snapshot, deadline)

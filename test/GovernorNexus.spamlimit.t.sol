@@ -10,9 +10,9 @@ import {StandardRuleset} from "../src/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {RevertingViewsRuleset} from "./mocks/MaliciousRulesets.sol";
 
-/// @dev Nexus 4 spam limit (spec 2026-07-16, D22-D25): per-proposer cap on concurrently
-///      live (Pending|Active) proposals, lazily pruned at propose time. `bob`/`carol` are
-///      the spam subjects so `alice` stays free for the governance loop the setters need.
+/// @dev Per-proposer cap on concurrently live (Pending|Active) proposals, lazily pruned
+///      at propose time. `bob`/`carol` are the spam subjects so `alice` stays free for
+///      the governance loop the setters need.
 contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
@@ -61,7 +61,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         );
     }
 
-    // ─────────────────────────── Cap behavior (spec §5.1) ───────────────────────────
+    // ─────────────────────────── Cap behavior ───────────────────────────
 
     function test_thirdLiveProposal_reverts() public {
         _proposeAs(bob, "p1");
@@ -91,7 +91,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         governor.proposeWithType(targets, values, calldatas, "door3", 0);
     }
 
-    // ─────────────────────── Prune per exit state (spec §5.2, D23) ───────────────────────
+    // ─────────────────────── Prune per exit state ───────────────────────
 
     function test_canceledProposal_freesSlot_sameBlock() public {
         _proposeAs(bob, "p1");
@@ -125,7 +125,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     }
 
     function test_queuedProposal_doesNotOccupySlot() public {
-        // D23: Queued survived the vote — it is no longer contestable attention-spam
+        // Queued survived the vote — it is no longer contestable attention-spam
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas, bytes32 descriptionHash) =
             _args("queued");
         vm.prank(bob);
@@ -163,7 +163,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         assertEq(governor.activeProposalCount(bob), 2);
     }
 
-    // ─────────────────────────── Setter guards (spec §5.3, D24) ───────────────────────────
+    // ─────────────────────────── Setter guards ───────────────────────────
 
     function test_constructor_rejectsZeroAndAboveCeiling() public {
         StandardRuleset ruleset = _newRuleset();
@@ -207,7 +207,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         assertEq(governor.maxActiveProposals(), 3);
     }
 
-    // ─────────────────── Cap lowered below live count (spec §5.4) ───────────────────
+    // ─────────────────── Cap lowered below live count ───────────────────
 
     function test_capLoweredBelowLiveCount_blocksUntilBelowNewCap() public {
         _proposeAs(bob, "p1");
@@ -232,7 +232,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id2)), uint8(IGovernor.ProposalState.Defeated));
     }
 
-    // ─────────────────────────── Views + independence (spec §5.5-5.6) ───────────────────────────
+    // ─────────────────────────── Views + independence ───────────────────────────
 
     function test_activeProposalCount_neverCountsDeadUnprunedIds() public {
         assertEq(governor.activeProposalCount(bob), 0);
@@ -244,7 +244,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         assertEq(governor.activeProposalCount(bob), 1);
     }
 
-    // ─────────────────── Containment: poisoned ruleset cannot brick propose (D26) ───────────────────
+    // ─────────────────── Containment: poisoned ruleset cannot brick propose ───────────────────
 
     function test_poisonedRulesetProposal_doesNotBrickProposersNextPropose() public {
         // register a ruleset whose outcome views revert (the Nexus 1 adversarial mock)
