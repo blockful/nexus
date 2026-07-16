@@ -171,4 +171,47 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
         return abi.encodePacked(r, s, v);
     }
+
+    // ─────────────────────── 4. Duplicates & re-votes (D32) ───────────────────────
+
+    /// @dev Under mutable votes a duplicate id inside one batch is a valid same-tx
+    ///      re-vote, last-wins. Both entries emit VoteCast and both report a weight;
+    ///      conservation holds (the first vote's weight is debited before the second
+    ///      credits).
+    function test_castVoteBatch_duplicateIdIsIntraTxRevote_lastWins() public {
+        uint256 p1 = _proposeActive(1, "dup", 0);
+
+        vm.expectEmit(true, true, true, true, address(governor));
+        emit IGovernor.VoteCast(carol, p1, 1, 30e18, "first");
+        vm.expectEmit(true, true, true, true, address(governor));
+        emit IGovernor.VoteCast(carol, p1, 0, 30e18, "changed my mind");
+
+        vm.prank(carol);
+        uint256[] memory weights = governor.castVoteBatch(
+            _ids(p1, p1), _supports(1, 0), _reasons("first", "changed my mind"), _params("", "")
+        );
+
+        assertEq(weights[0], 30e18);
+        assertEq(weights[1], 30e18);
+        assertEq(standardRuleset.tally(p1, 1), 0, "first vote debited (replace semantics)");
+        assertEq(standardRuleset.tally(p1, 0), 30e18, "last wins");
+        assertTrue(governor.hasVoted(p1, carol));
+    }
+
+    /// @dev A batch containing a proposal the voter already voted on singly is a re-vote
+    ///      through the batch path — replace semantics hold end-to-end.
+    function test_castVoteBatch_revotesOverEarlierSingleVote() public {
+        uint256 p1 = _proposeActive(1, "revote via batch", 0);
+        uint256 p2 = _proposeActive(2, "fresh", 0);
+
+        vm.prank(carol);
+        governor.castVote(p1, 1); // single For, 30e18
+
+        vm.prank(carol);
+        governor.castVoteBatch(_ids(p1, p2), _supports(0, 1), _reasons("", ""), _params("", ""));
+
+        assertEq(standardRuleset.tally(p1, 1), 0, "single For debited by the batched re-vote");
+        assertEq(standardRuleset.tally(p1, 0), 30e18, "batched Against stands");
+        assertEq(standardRuleset.tally(p2, 1), 30e18, "fresh vote lands");
+    }
 }
