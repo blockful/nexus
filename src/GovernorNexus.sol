@@ -418,7 +418,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     ///      `VoteCastWithParams` otherwise. Explicit function rather than `Multicall` (D31):
     ///      the governor's payable surface (`execute`/`relay`/`receive`) makes Multicall the
     ///      msg.value-reuse bug class; if a trusted forwarder is ever added, revisit this
-    ///      entry point.
+    ///      entry point. Guard order: an all-empty call reverts `EmptyBatch` even when the
+    ///      other array lengths also disagree — the zero-length check runs first and is the
+    ///      more specific diagnosis.
     function castVoteBatch(
         uint256[] calldata proposalIds,
         uint8[] calldata supportValues,

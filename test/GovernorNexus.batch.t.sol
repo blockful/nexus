@@ -11,9 +11,11 @@ import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 
 /// @dev Batch voting suite (Nexus 6, DEV-1002 — spec D27–D32). Extends the shared base:
-///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter so every weight
-///      assertion reads 30e18. All-or-nothing semantics (D29), one nonce spend per batch
-///      (D30), duplicates are intra-tx re-votes (D32).
+///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter, so most weight
+///      assertions read 30e18 — except test_castVoteBatch_weightsFollowEachProposalsSnapshot,
+///      which tops carol up mid-suite to prove per-item snapshot reads diverge. All-or-nothing
+///      semantics (D29), one nonce spend per batch (D30), duplicates are intra-tx re-votes
+///      (D32).
 contract GovernorNexusBatchTest is GovernorNexusTestBase {
     address internal carol = makeAddr("carol");
     Box internal box;
@@ -97,6 +99,28 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertTrue(governor.hasVoted(p2, carol));
         assertEq(standardRuleset.tally(p1, 1), 30e18, "For tally on p1");
         assertEq(standardRuleset.tally(p2, 0), 30e18, "Against tally on p2");
+    }
+
+    /// @dev D27's array-return rationale is distinct per-proposal snapshots → potentially
+    ///      distinct weights. Prove it: carol's balance changes between the two proposals'
+    ///      snapshots, so a single batch call must report two different weights, each read
+    ///      at its own proposal's snapshot block.
+    function test_castVoteBatch_weightsFollowEachProposalsSnapshot() public {
+        uint256 p1 = _proposeActive(1, "early snap", 0); // rolls past p1's snapshot @ 30e18
+
+        _fund(carol, 20e18); // total 50e18, re-delegated
+        vm.roll(block.number + 1);
+
+        uint256 p2 = _proposeActive(2, "late snap", 0); // rolls past p2's snapshot @ 50e18
+
+        vm.prank(carol);
+        uint256[] memory weights =
+            governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
+
+        assertEq(weights[0], 30e18, "p1 weight: pre-top-up snapshot");
+        assertEq(weights[1], 50e18, "p2 weight: post-top-up snapshot");
+        assertEq(standardRuleset.tally(p1, 1), 30e18, "p1 tally matches its own snapshot");
+        assertEq(standardRuleset.tally(p2, 1), 50e18, "p2 tally matches its own snapshot");
     }
 
     // ─────────────────────────── 2. Guards (D29) ───────────────────────────
@@ -305,11 +329,12 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         uint256 p1 = _proposeActive(1, "fuzz A", 0);
         uint256 p2 = _proposeActive(2, "fuzz B", 0);
+        uint256 p3 = _proposeActive(3, "fuzz C", 0);
 
         uint256[] memory ids = new uint256[](3);
         ids[0] = p1;
         ids[1] = p2;
-        ids[2] = duplicate ? p1 : p2; // third item re-votes one of the two
+        ids[2] = duplicate ? p1 : p3; // false: three genuinely distinct proposals
         uint8[] memory supportValues = new uint8[](3);
         supportValues[0] = s0;
         supportValues[1] = s1;
@@ -321,7 +346,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         vm.prank(carol);
         governor.castVoteBatch(ids, supportValues, reasons, params);
-        uint256[6] memory batchTallies = _tallies(p1, p2);
+        uint256[9] memory batchTallies = _tallies(p1, p2, p3);
 
         vm.revertToState(snap);
 
@@ -329,17 +354,18 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
             vm.prank(carol);
             governor.castVote(ids[i], supportValues[i]);
         }
-        uint256[6] memory singleTallies = _tallies(p1, p2);
+        uint256[9] memory singleTallies = _tallies(p1, p2, p3);
 
-        for (uint256 i = 0; i < 6; ++i) {
+        for (uint256 i = 0; i < 9; ++i) {
             assertEq(batchTallies[i], singleTallies[i], "batch != sequence of singles");
         }
     }
 
-    function _tallies(uint256 p1, uint256 p2) internal view returns (uint256[6] memory t) {
+    function _tallies(uint256 p1, uint256 p2, uint256 p3) internal view returns (uint256[9] memory t) {
         for (uint8 s = 0; s <= 2; ++s) {
             t[s] = standardRuleset.tally(p1, s);
             t[3 + s] = standardRuleset.tally(p2, s);
+            t[6 + s] = standardRuleset.tally(p3, s);
         }
     }
 
