@@ -59,6 +59,12 @@ Two consequences follow for integrators:
   nonce is per-account). A stale pre-signed ballot therefore cannot override a later direct vote
   under mutable votes; a relayer needs a fresh signature once the voter acts directly.
 
+Batch voting (`castVoteBatch`) casts votes on several proposals in one transaction,
+all-or-nothing. A batch is a direct cast: it spends the voter's nonce once, so — like any
+direct vote — it invalidates the voter's outstanding signed ballots across all open
+proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
+`reasons[i]`/`params[i]` entries mean "none".
+
 ## Layout
 
 | Path | What |
