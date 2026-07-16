@@ -268,4 +268,25 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(standardRuleset.tally(p0, 1), 0, "valid item rolled back with the batch");
         assertEq(rs1.tally(p1, 1), 0);
     }
+
+    // ─────────────────────── 6. Params passthrough (D27) ───────────────────────
+
+    /// @dev Empty params[i] → stock VoteCast; non-empty → VoteCastWithParams (OZ's own
+    ///      dispatch in _castVote — no code of ours). StandardRuleset ignores params, so
+    ///      counting is identical either way.
+    function test_castVoteBatch_paramsDispatchPerItem() public {
+        uint256 p1 = _proposeActive(1, "plain", 0);
+        uint256 p2 = _proposeActive(2, "with params", 0);
+
+        vm.expectEmit(true, true, true, true, address(governor));
+        emit IGovernor.VoteCast(carol, p1, 1, 30e18, "");
+        vm.expectEmit(true, true, true, true, address(governor));
+        emit IGovernor.VoteCastWithParams(carol, p2, 1, 30e18, "", hex"beef");
+
+        vm.prank(carol);
+        governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", hex"beef"));
+
+        assertEq(standardRuleset.tally(p1, 1), 30e18);
+        assertEq(standardRuleset.tally(p2, 1), 30e18, "params ignored by StandardRuleset counting");
+    }
 }
