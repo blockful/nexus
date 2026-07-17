@@ -185,8 +185,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
-        // A period not exceeding the trigger window would make "the final window" the whole
-        // vote, hollowing out the late-flip semantics.
+        // The late-flip trigger window is the FINAL `extensionWindow` of the voting period.
+        // With a period this short the window would start at (or before) the vote itself, so
+        // every vote is a "late" vote — and since proposals start failing (empty tally), any
+        // proposal that ends up passing would get the extension. Reject the type instead.
         if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
 
         id = typeCount++;
