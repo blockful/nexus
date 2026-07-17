@@ -122,7 +122,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
 
     // ─────────────────────────── trigger matrix ───────────────────────────
 
-    /// @dev The RFC's headline case: failing at window entry, flipped passing inside the
+    /// @dev The headline case: failing at window entry, flipped passing inside the
     ///      window → extended by exactly `extensionDuration` past the ORIGINAL deadline.
     function test_flipInsideWindow_extendsDeadlineByExtensionDuration() public {
         (uint256 id, uint256 t) = _proposeActive("flip inside window");
@@ -157,7 +157,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active), "T is a voting block either way");
     }
 
-    /// @dev RFC: "normal proposals are not delayed when outcome direction is stable" —
+    /// @dev Normal proposals are not delayed when outcome direction is stable —
     ///      passing through the whole window (with in-window activity) never extends.
     function test_stablePassingThroughWindow_noExtension() public {
         (uint256 id, uint256 t) = _proposeActive("stable passing");
