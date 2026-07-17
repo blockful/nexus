@@ -9,17 +9,17 @@ import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {MockOptimisticRuleset} from "./mocks/MockOptimisticRuleset.sol";
 
-/// @dev Nexus 3 — anti-snipe late-vote extension (spec D33-D38). The mechanism's public
-///      surface is deliberately minimal: the `proposalDeadline` view, the `ProposalExtended`
-///      event, and the two immutable params — every test here asserts through those only.
+/// @dev Anti-snipe late-vote extension. The mechanism's public surface is deliberately
+///      minimal: the `proposalDeadline` view, the `ProposalExtended` event, and the two
+///      immutable params — every test here asserts through those only.
 ///
-///      Trigger semantics under test (D33, "window low-water mark"): the extension fires iff
-///      the proposal was observed failing at any point inside the final `extensionWindow` AND
+///      Trigger semantics under test ("window low-water mark"): the extension fires iff the
+///      proposal was observed failing at any point inside the final `extensionWindow` AND
 ///      would pass at the original deadline — with no state armed on tally crossings, so
-///      mutable-vote oscillation (F2) cannot burn it. Anchor: original deadline +
-///      `extensionDuration`, regardless of flip timing (D34, closes F4).
+///      mutable-vote oscillation cannot burn it. Anchor: original deadline +
+///      `extensionDuration`, regardless of flip timing.
 contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
-    /// @dev OZ `GovernorPreventLateQuorum` event ABI, adopted verbatim (D38).
+    /// @dev OZ `GovernorPreventLateQuorum` event ABI, adopted verbatim.
     event ProposalExtended(uint256 indexed proposalId, uint64 extendedDeadline);
 
     address internal bob = makeAddr("bob"); // can out-vote alice alone
@@ -56,12 +56,12 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         governor.castVote(id, support);
     }
 
-    /// @dev "Would pass right now" exactly as the core evaluates it (D36).
+    /// @dev "Would pass right now" exactly as the core evaluates it.
     function _wouldPass(uint256 id) internal view returns (bool) {
         return standardRuleset.quorumReached(id) && standardRuleset.voteSucceeded(id);
     }
 
-    // ─────────────────────────── constructor surface (D37) ───────────────────────────
+    // ─────────────────────────── constructor surface ───────────────────────────
 
     function test_constructor_extensionParamsExposed() public view {
         assertEq(governor.extensionWindow(), EXTENSION_WINDOW);
@@ -120,7 +120,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
     ///      registration path), so the constructor case above exercises the same check the
     ///      governance door hits.
 
-    // ─────────────────────────── trigger matrix (§6.1) ───────────────────────────
+    // ─────────────────────────── trigger matrix ───────────────────────────
 
     /// @dev The RFC's headline case: failing at window entry, flipped passing inside the
     ///      window → extended by exactly `extensionDuration` past the ORIGINAL deadline.
@@ -143,7 +143,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
     }
 
     /// @dev Before the original deadline the view promises nothing: a mid-window flip can
-    ///      still revert, so the extension is undecidable until T (D33).
+    ///      still revert, so the extension is undecidable until T.
     function test_deadlineViewUnchangedBeforeOriginalDeadline() public {
         (uint256 id, uint256 t) = _proposeActive("undecidable before T");
 
@@ -181,9 +181,9 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated), "defeated at T");
     }
 
-    /// @dev The dip-snipe (spec §5.2) — the scenario a two-point boundary comparison misses.
-    ///      Passing at window entry AND at T, but failing in between: the low-water mark
-    ///      catches the mid-window failing state, so the late re-flip still extends.
+    /// @dev The dip-snipe — the scenario a two-point boundary comparison misses. Passing at
+    ///      window entry AND at T, but failing in between: the low-water mark catches the
+    ///      mid-window failing state, so the late re-flip still extends.
     function test_dipAndRecover_passingAtBothBoundaries_stillExtends() public {
         (uint256 id, uint256 t) = _proposeActive("dip and recover");
 
@@ -198,8 +198,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active), "response window open");
     }
 
-    /// @dev F2 (spec §5.1): the oscillation that burned OZ's one-shot slot. Crossing early,
-    ///      re-voting down, and sniping late must CAUSE the extension, not consume it.
+    /// @dev The oscillation that burns OZ-style one-shot slots. Crossing early, re-voting
+    ///      down, and sniping late must CAUSE the extension, not consume it.
     function test_f2Oscillation_cannotBurnExtension() public {
         (uint256 id, uint256 t) = _proposeActive("F2 oscillation");
 
@@ -215,8 +215,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(governor.proposalDeadline(id), t + EXTENSION_DURATION, "extension not burnable by oscillation");
     }
 
-    /// @dev One-directional trigger (RFC): a late flip TO failing gets no extension — the
-    ///      proposal simply dies at T. sawFailing alone is not enough; it must pass at T.
+    /// @dev One-directional trigger: a late flip TO failing gets no extension — the proposal
+    ///      simply dies at T. A failing observation alone is not enough; it must pass at T.
     function test_lateFlipToFailing_noExtension() public {
         (uint256 id, uint256 t) = _proposeActive("late flip to failing");
 
@@ -229,7 +229,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated), "dies at T");
     }
 
-    // ─────────────────────── lazy materialization & event (§6.3, D38) ───────────────────────
+    // ─────────────────────── lazy materialization & event ───────────────────────
 
     /// @dev The first cast after T materializes the (already-determined) extension and emits
     ///      the OZ-shaped event — exactly once, anchored at T + duration.
@@ -255,8 +255,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         }
     }
 
-    /// @dev D38 degenerate case: nobody votes during the extension — the event never fires,
-    ///      but the views stay correct forever off the tally frozen since T.
+    /// @dev Degenerate case: nobody votes during the extension — the event never fires, but
+    ///      the views stay correct forever off the tally frozen since T.
     function test_noVotesDuringExtension_viewsConsistent_noEvent() public {
         (uint256 id, uint256 t) = _proposeActive("silent extension");
 
@@ -285,7 +285,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated), "still defeated");
     }
 
-    // ─────────────────────── free voting during the extension (D35) ───────────────────────
+    // ─────────────────────── free voting during the extension ───────────────────────
 
     /// @dev Votes stay free in both directions during the extension; the tally at T+E decides.
     ///      Here the community uses the response window to defeat the sniped proposal.
@@ -304,8 +304,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated), "snipe defeated in the extension");
     }
 
-    /// @dev One extension only (RFC "hasn't been extended before"): a flip inside the
-    ///      extension never re-extends — T + E is a hard ceiling.
+    /// @dev One extension only: a flip inside the extension never re-extends — T + E is a
+    ///      hard ceiling.
     function test_noSecondExtension_flipInsideExtensionDoesNotReExtend() public {
         (uint256 id, uint256 t) = _proposeActive("no re-extension");
 
@@ -323,10 +323,11 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Succeeded), "decided at the ceiling");
     }
 
-    // ─────────────────────── cast-path coverage: bySig (§6.5) ───────────────────────
+    // ─────────────────────── cast-path coverage: bySig ───────────────────────
 
-    /// @dev The hooks live on the internal `_castVote`, so the sig paths (which skip the D21
-    ///      public overrides) are covered too: a bySig flip inside the window extends.
+    /// @dev The hooks live on the internal `_castVote`, so the sig paths (which skip the
+    ///      public `castVote*` overrides) are covered too: a bySig flip inside the window
+    ///      extends.
     function test_castVoteBySig_insideWindow_triggersExtension() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
         _fund(signer, 5_000_000e18);
@@ -343,7 +344,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(governor.proposalDeadline(id), t + EXTENSION_DURATION, "sig-path flip extends");
     }
 
-    // ─────────────────────── all-types coverage (§6.4, D36) ───────────────────────
+    // ─────────────────────── all-types coverage ───────────────────────
 
     /// @dev Under optimistic semantics ("pass unless opposition ≥ veto"), the failing→passing
     ///      flip reads as opposition crossing the veto and RECEDING late — the core's
@@ -374,9 +375,9 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active), "response window open");
     }
 
-    // ─────────────────────── property fuzz (§6.2) ───────────────────────
+    // ─────────────────────── property fuzz ───────────────────────
 
-    /// @dev The milestone invariant, model-checked: for arbitrary bounded cast sequences,
+    /// @dev The core invariant, model-checked: for arbitrary bounded cast sequences,
     ///      the effective deadline is T+E iff (some in-window evaluation — pre- or post-cast —
     ///      observed a failing state) AND (the outcome at T is passing); otherwise T. The
     ///      model mirrors D33's observation points exactly, which is sound because tallies

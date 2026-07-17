@@ -29,9 +29,7 @@ interface IRuleset is IERC165 {
     ///      either way). A consumer requiring finality MUST evaluate at/near the deadline and
     ///      MUST NOT arm one-shot state on a tally-crossing event — an attacker could cross the
     ///      threshold early, re-vote back below it, and burn a once-only trigger before the
-    ///      crossing that matters. Reference compliant consumer: `GovernorNexus`'s late-flip
-    ///      extension (Nexus 3) keys on protection-monotone observations plus an outcome read
-    ///      at the deadline, never on a crossing.
+    ///      crossing that matters.
     function quorumReached(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `proposalId`'s tallied votes satisfy this ruleset's pass/fail rule.

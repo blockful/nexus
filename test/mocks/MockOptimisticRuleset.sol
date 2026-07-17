@@ -8,9 +8,9 @@ import {RulesetCounting} from "../../src/RulesetCounting.sol";
 
 /// @dev Optimistic-style test ruleset: passes by default, fails only once Against weight
 ///      reaches `vetoThreshold`; no quorum requirement. Exercises the late-flip extension's
-///      type-agnosticism (spec D36) — under these inverted semantics a failing→passing flip
-///      reads as "opposition crossed the veto threshold and then receded", and the core's
-///      mechanism must fire on it with zero type-specific code.
+///      type-agnosticism — under these inverted semantics a failing→passing flip reads as
+///      "opposition crossed the veto threshold and then receded", and the core's mechanism
+///      must fire on it with zero type-specific code.
 contract MockOptimisticRuleset is RulesetCounting {
     enum VoteType {
         Against,
@@ -24,7 +24,7 @@ contract MockOptimisticRuleset is RulesetCounting {
         vetoThreshold = vetoThreshold_;
     }
 
-    /// @dev No quorum requirement — always met (RFC §2.7: "No quorum requirement").
+    /// @dev No quorum requirement — always met.
     function quorumReached(uint256) external pure returns (bool) {
         return true;
     }

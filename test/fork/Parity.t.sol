@@ -207,8 +207,8 @@ contract ParityDivergencesTest is BaseTest {
         assertTrue(scaffoldGov.hasVoted(scaffoldId, WHALE), "the whale still has a standing vote");
     }
 
-    /// BEHAVIORAL divergence #5 (Nexus 3, D33/D34) — the second deliberate RFC mechanism: a
-    /// failing→passing flip inside the final `extensionWindow` (24h) extends Nexus voting by
+    /// BEHAVIORAL divergence #5 — the second deliberate RFC mechanism: a failing→passing
+    /// flip inside the final `extensionWindow` (24h) extends Nexus voting by
     /// `extensionDuration` (48h) past the ORIGINAL deadline; the live governor closes on
     /// schedule regardless of when the outcome flipped. Here the flip is the simplest kind:
     /// the proposal sits failing (no votes → quorum unmet) until the WHALE flips it passing
@@ -233,7 +233,7 @@ contract ParityDivergencesTest is BaseTest {
         // Live: decided at the original deadline, snipe window and all.
         assertEq(liveGov.proposalDeadline(liveId), liveDeadline, "live never extends");
         assertEq(liveGov.state(liveId), 4, "live is already Succeeded"); // ProposalState.Succeeded
-        // Nexus: 48h of response time, anchored at the original deadline (D34).
+        // Nexus: 48h of response time, anchored at the original deadline.
         assertEq(
             scaffoldGov.proposalDeadline(scaffoldId),
             scaffoldDeadline + ENSParams.EXTENSION_DURATION,

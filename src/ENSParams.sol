@@ -18,8 +18,8 @@ library ENSParams {
     // is denominator-independent.
     uint256 internal constant QUORUM_NUMERATOR = 1;
 
-    // Nexus 3 late-flip extension (RFC §2.6, spec D37): final-24h trigger window and 48h
-    // extension, in blocks (~12s/block), matching the block-denominated voting period above.
+    // Late-flip extension (RFC §2.6): final-24h trigger window and 48h extension, in
+    // blocks (~12s/block), matching the block-denominated voting period above.
     uint48 internal constant EXTENSION_WINDOW = 7200; // 24h
     uint48 internal constant EXTENSION_DURATION = 14_400; // 48h
 }
