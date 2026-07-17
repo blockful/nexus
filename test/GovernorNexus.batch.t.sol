@@ -10,9 +10,9 @@ import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 
-/// @dev Batch voting suite for `castVoteBatch`. Extends the shared base:
+/// @dev Batch voting suite for `castVoteWithReasonAndParamsBatch`. Extends the shared base:
 ///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter, so most weight
-///      assertions read 30e18 — except test_castVoteBatch_weightsFollowEachProposalsSnapshot,
+///      assertions read 30e18 — except test_castVoteWithReasonAndParamsBatch_weightsFollowEachProposalsSnapshot,
 ///      which tops carol up mid-suite to prove per-item snapshot reads diverge. All-or-nothing
 ///      semantics, one nonce spend per batch, duplicates are intra-tx re-votes.
 contract GovernorNexusBatchTest is GovernorNexusTestBase {
@@ -78,7 +78,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
     // ─────────────────────────── 1. Happy path ───────────────────────────
 
-    function test_castVoteBatch_votesOnMultipleProposals() public {
+    function test_castVoteWithReasonAndParamsBatch_votesOnMultipleProposals() public {
         uint256 p1 = _proposeActive(1, "batch 1", 0);
         uint256 p2 = _proposeActive(2, "batch 2", 0);
 
@@ -88,8 +88,9 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         emit IGovernor.VoteCast(carol, p2, 0, 30e18, "");
 
         vm.prank(carol);
-        uint256[] memory weights =
-            governor.castVoteBatch(_ids(p1, p2), _supports(1, 0), _reasons("yes", ""), _params("", ""));
+        uint256[] memory weights = governor.castVoteWithReasonAndParamsBatch(
+            _ids(p1, p2), _supports(1, 0), _reasons("yes", ""), _params("", "")
+        );
 
         assertEq(weights.length, 2, "one weight per item");
         assertEq(weights[0], 30e18, "p1 weight");
@@ -104,7 +105,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     ///      potentially distinct weights. Prove it: carol's balance changes between the two proposals'
     ///      snapshots, so a single batch call must report two different weights, each read
     ///      at its own proposal's snapshot block.
-    function test_castVoteBatch_weightsFollowEachProposalsSnapshot() public {
+    function test_castVoteWithReasonAndParamsBatch_weightsFollowEachProposalsSnapshot() public {
         uint256 p1 = _proposeActive(1, "early snap", 0); // rolls past p1's snapshot @ 30e18
 
         _fund(carol, 20e18); // total 50e18, re-delegated
@@ -114,7 +115,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         vm.prank(carol);
         uint256[] memory weights =
-            governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
+            governor.castVoteWithReasonAndParamsBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
 
         assertEq(weights[0], 30e18, "p1 weight: pre-top-up snapshot");
         assertEq(weights[1], 50e18, "p2 weight: post-top-up snapshot");
@@ -124,25 +125,25 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
     // ─────────────────────────── 2. Guards ───────────────────────────
 
-    function test_castVoteBatch_emptyBatchReverts() public {
+    function test_castVoteWithReasonAndParamsBatch_emptyBatchReverts() public {
         vm.expectRevert(GovernorNexus.EmptyBatch.selector);
         vm.prank(carol);
-        governor.castVoteBatch(new uint256[](0), new uint8[](0), new string[](0), new bytes[](0));
+        governor.castVoteWithReasonAndParamsBatch(new uint256[](0), new uint8[](0), new string[](0), new bytes[](0));
     }
 
-    function test_castVoteBatch_lengthMismatchReverts() public {
+    function test_castVoteWithReasonAndParamsBatch_lengthMismatchReverts() public {
         // supports shorter
         vm.expectRevert(GovernorNexus.BatchLengthMismatch.selector);
         vm.prank(carol);
-        governor.castVoteBatch(new uint256[](2), new uint8[](1), new string[](2), new bytes[](2));
+        governor.castVoteWithReasonAndParamsBatch(new uint256[](2), new uint8[](1), new string[](2), new bytes[](2));
         // reasons shorter
         vm.expectRevert(GovernorNexus.BatchLengthMismatch.selector);
         vm.prank(carol);
-        governor.castVoteBatch(new uint256[](2), new uint8[](2), new string[](1), new bytes[](2));
+        governor.castVoteWithReasonAndParamsBatch(new uint256[](2), new uint8[](2), new string[](1), new bytes[](2));
         // params shorter
         vm.expectRevert(GovernorNexus.BatchLengthMismatch.selector);
         vm.prank(carol);
-        governor.castVoteBatch(new uint256[](2), new uint8[](2), new string[](2), new bytes[](1));
+        governor.castVoteWithReasonAndParamsBatch(new uint256[](2), new uint8[](2), new string[](2), new bytes[](1));
     }
 
     // ─────────────────────────── 3. Nonce spend ───────────────────────────
@@ -151,7 +152,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     ///      ballots, exactly like the single-vote nonce-spending overrides. Without this,
     ///      the batch path reintroduces the stale-ballot override: a relayer could land a
     ///      previously signed ballot on top of the voter's later direct vote.
-    function test_castVoteBatch_invalidatesOutstandingSignedBallot() public {
+    function test_castVoteWithReasonAndParamsBatch_invalidatesOutstandingSignedBallot() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
         _fund(signer, 30e18);
         vm.roll(block.number + 1);
@@ -169,7 +170,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         string[] memory reasons = new string[](1);
         bytes[] memory params = new bytes[](1);
         vm.prank(signer);
-        governor.castVoteBatch(ids, supportValues, reasons, params);
+        governor.castVoteWithReasonAndParamsBatch(ids, supportValues, reasons, params);
 
         // The outstanding ballot died with the batch.
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
@@ -204,7 +205,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     ///      re-vote, last-wins. Both entries emit VoteCast and both report a weight;
     ///      conservation holds (the first vote's weight is debited before the second
     ///      credits).
-    function test_castVoteBatch_duplicateIdIsIntraTxRevote_lastWins() public {
+    function test_castVoteWithReasonAndParamsBatch_duplicateIdIsIntraTxRevote_lastWins() public {
         uint256 p1 = _proposeActive(1, "dup", 0);
 
         vm.expectEmit(true, true, true, true, address(governor));
@@ -213,7 +214,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         emit IGovernor.VoteCast(carol, p1, 0, 30e18, "changed my mind");
 
         vm.prank(carol);
-        uint256[] memory weights = governor.castVoteBatch(
+        uint256[] memory weights = governor.castVoteWithReasonAndParamsBatch(
             _ids(p1, p1), _supports(1, 0), _reasons("first", "changed my mind"), _params("", "")
         );
 
@@ -226,7 +227,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
     /// @dev A batch containing a proposal the voter already voted on singly is a re-vote
     ///      through the batch path — replace semantics hold end-to-end.
-    function test_castVoteBatch_revotesOverEarlierSingleVote() public {
+    function test_castVoteWithReasonAndParamsBatch_revotesOverEarlierSingleVote() public {
         uint256 p1 = _proposeActive(1, "revote via batch", 0);
         uint256 p2 = _proposeActive(2, "fresh", 0);
 
@@ -234,7 +235,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         governor.castVote(p1, 1); // single For, 30e18
 
         vm.prank(carol);
-        governor.castVoteBatch(_ids(p1, p2), _supports(0, 1), _reasons("", ""), _params("", ""));
+        governor.castVoteWithReasonAndParamsBatch(_ids(p1, p2), _supports(0, 1), _reasons("", ""), _params("", ""));
 
         assertEq(standardRuleset.tally(p1, 1), 0, "single For debited by the batched re-vote");
         assertEq(standardRuleset.tally(p1, 0), 30e18, "batched Against stands");
@@ -246,7 +247,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     /// @dev One dead id (canceled between signing and inclusion) reverts the other item
     ///      too — no partial state. Recovery is resending without the dead id (idempotent
     ///      under mutable votes).
-    function test_castVoteBatch_canceledItemRevertsWholeBatch() public {
+    function test_castVoteWithReasonAndParamsBatch_canceledItemRevertsWholeBatch() public {
         uint256 p1 = _proposeActive(1, "survives", 0);
 
         // p2 stays Pending so the proposer can still cancel it (stock OZ rule).
@@ -266,7 +267,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
                 bytes32(uint256(1) << uint8(IGovernor.ProposalState.Active))
             )
         );
-        governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
+        governor.castVoteWithReasonAndParamsBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", ""));
 
         assertEq(standardRuleset.tally(p1, 1), 0, "no partial state: p1 vote rolled back");
         assertFalse(governor.hasVoted(p1, carol));
@@ -275,7 +276,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     /// @dev Support validity is per-ruleset (_isValidSupport). A support value invalid for
     ///      one item's ruleset reverts the whole batch, including items whose support was
     ///      fine for THEIR ruleset.
-    function test_castVoteBatch_mixedRulesets_invalidSupportRevertsAll() public {
+    function test_castVoteWithReasonAndParamsBatch_mixedRulesets_invalidSupportRevertsAll() public {
         StandardRuleset rs1 = _newRuleset();
         _executeSelfCall(
             abi.encodeCall(GovernorNexus.registerType, (rs1, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD)),
@@ -287,7 +288,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         vm.prank(carol);
         vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
-        governor.castVoteBatch(_ids(p0, p1), _supports(1, 3), _reasons("", ""), _params("", ""));
+        governor.castVoteWithReasonAndParamsBatch(_ids(p0, p1), _supports(1, 3), _reasons("", ""), _params("", ""));
 
         assertEq(standardRuleset.tally(p0, 1), 0, "valid item rolled back with the batch");
         assertEq(rs1.tally(p1, 1), 0);
@@ -298,7 +299,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     /// @dev Empty params[i] → stock VoteCast; non-empty → VoteCastWithParams (OZ's own
     ///      dispatch in _castVote — no code of ours). StandardRuleset ignores params, so
     ///      counting is identical either way.
-    function test_castVoteBatch_paramsDispatchPerItem() public {
+    function test_castVoteWithReasonAndParamsBatch_paramsDispatchPerItem() public {
         uint256 p1 = _proposeActive(1, "plain", 0);
         uint256 p2 = _proposeActive(2, "with params", 0);
 
@@ -308,7 +309,9 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         emit IGovernor.VoteCastWithParams(carol, p2, 1, 30e18, "", hex"beef");
 
         vm.prank(carol);
-        governor.castVoteBatch(_ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", hex"beef"));
+        governor.castVoteWithReasonAndParamsBatch(
+            _ids(p1, p2), _supports(1, 1), _reasons("", ""), _params("", hex"beef")
+        );
 
         assertEq(standardRuleset.tally(p1, 1), 30e18);
         assertEq(standardRuleset.tally(p2, 1), 30e18, "params ignored by StandardRuleset counting");
@@ -319,9 +322,12 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     /// @dev State equivalence: a batch lands exactly the tallies a sequence of single
     ///      casts lands (same voter, same order). Includes duplicate ids (re-votes) and
     ///      the full support range via bounding.
-    function testFuzz_castVoteBatch_equivalentToSingleCastSequence(uint8 s0, uint8 s1, uint8 s2, bool duplicate)
-        public
-    {
+    function testFuzz_castVoteWithReasonAndParamsBatch_equivalentToSingleCastSequence(
+        uint8 s0,
+        uint8 s1,
+        uint8 s2,
+        bool duplicate
+    ) public {
         s0 = uint8(bound(s0, 0, 2));
         s1 = uint8(bound(s1, 0, 2));
         s2 = uint8(bound(s2, 0, 2));
@@ -344,7 +350,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         uint256 snap = vm.snapshotState();
 
         vm.prank(carol);
-        governor.castVoteBatch(ids, supportValues, reasons, params);
+        governor.castVoteWithReasonAndParamsBatch(ids, supportValues, reasons, params);
         uint256[9] memory batchTallies = _tallies(p1, p2, p3);
 
         vm.revertToState(snap);
@@ -374,7 +380,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
     ///      assertion below is intrinsic-adjusted, crediting the (N-1) avoided per-tx 21k
     ///      intrinsic costs that a single-EVM-call harness cannot otherwise see. Real-world
     ///      savings (avoided top-level calldata too) are larger than reported here.
-    function test_castVoteBatch_gasComparedToSingles() public {
+    function test_castVoteWithReasonAndParamsBatch_gasComparedToSingles() public {
         uint256[] memory ids = new uint256[](5);
         uint8[] memory supportValues = new uint8[](5);
         string[] memory reasons = new string[](5);
@@ -387,7 +393,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         uint256 snap = vm.snapshotState();
         vm.prank(carol);
         uint256 g0 = gasleft();
-        governor.castVoteBatch(ids, supportValues, reasons, params);
+        governor.castVoteWithReasonAndParamsBatch(ids, supportValues, reasons, params);
         uint256 batchGas = g0 - gasleft();
         vm.revertToState(snap);
 

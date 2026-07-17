@@ -79,9 +79,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
-    /// @notice `castVoteBatch` was called with zero items.
+    /// @notice `castVoteWithReasonAndParamsBatch` was called with zero items.
     error EmptyBatch();
-    /// @notice `castVoteBatch` array arguments have different lengths.
+    /// @notice `castVoteWithReasonAndParamsBatch` array arguments have different lengths.
     error BatchLengthMismatch();
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
@@ -421,7 +421,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     ///      entry point. Guard order: an all-empty call reverts `EmptyBatch` even when the
     ///      other array lengths also disagree — the zero-length check runs first and is the
     ///      more specific diagnosis.
-    function castVoteBatch(
+    function castVoteWithReasonAndParamsBatch(
         uint256[] calldata proposalIds,
         uint8[] calldata supportValues,
         string[] calldata reasons,
