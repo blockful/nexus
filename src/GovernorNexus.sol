@@ -409,13 +409,13 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return super.castVoteWithReasonAndParams(proposalId, support, reason, params);
     }
 
-    // ─────────────────────────── Batch voting (Nexus 6) ───────────────────────────
+    // ─────────────────────────── Batch voting ───────────────────────────
 
-    /// @notice Casts votes on several proposals in one transaction (RFC §2.3, spec D27).
-    /// @dev All-or-nothing: any failing item reverts the whole batch (D29). Duplicate ids are
-    ///      valid intra-tx re-votes under mutable votes, last-wins (D32). Empty `reasons[i]` /
+    /// @notice Casts votes on several proposals in one transaction (ENS governance RFC §2.3).
+    /// @dev All-or-nothing: any failing item reverts the whole batch. Duplicate ids are
+    ///      valid intra-tx re-votes under mutable votes, last-wins. Empty `reasons[i]` /
     ///      `params[i]` entries mean "none" — OZ emits `VoteCast` for empty params and
-    ///      `VoteCastWithParams` otherwise. Explicit function rather than `Multicall` (D31):
+    ///      `VoteCastWithParams` otherwise. Explicit function rather than `Multicall`:
     ///      the governor's payable surface (`execute`/`relay`/`receive`) makes Multicall the
     ///      msg.value-reuse bug class; if a trusted forwarder is ever added, revisit this
     ///      entry point. Guard order: an all-empty call reverts `EmptyBatch` even when the
@@ -435,8 +435,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
 
         address voter = _msgSender();
 
-        // A batch is a direct cast — spend the voter's nonce once so it invalidates any
-        // outstanding signed ballot (D30; account-global, so once per batch suffices — D21).
+        // A batch is a direct cast — spend the voter's nonce so it invalidates any
+        // outstanding signed ballot, exactly like the single-vote overrides above. The
+        // nonce is account-global, so one spend per batch suffices.
         _useNonce(voter);
 
         weights = new uint256[](n);

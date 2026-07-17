@@ -10,12 +10,11 @@ import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 
-/// @dev Batch voting suite (Nexus 6, DEV-1002 — spec D27–D32). Extends the shared base:
+/// @dev Batch voting suite for `castVoteBatch`. Extends the shared base:
 ///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter, so most weight
 ///      assertions read 30e18 — except test_castVoteBatch_weightsFollowEachProposalsSnapshot,
 ///      which tops carol up mid-suite to prove per-item snapshot reads diverge. All-or-nothing
-///      semantics (D29), one nonce spend per batch (D30), duplicates are intra-tx re-votes
-///      (D32).
+///      semantics, one nonce spend per batch, duplicates are intra-tx re-votes.
 contract GovernorNexusBatchTest is GovernorNexusTestBase {
     address internal carol = makeAddr("carol");
     Box internal box;
@@ -77,7 +76,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         arr[1] = b;
     }
 
-    // ─────────────────────────── 1. Happy path (D27) ───────────────────────────
+    // ─────────────────────────── 1. Happy path ───────────────────────────
 
     function test_castVoteBatch_votesOnMultipleProposals() public {
         uint256 p1 = _proposeActive(1, "batch 1", 0);
@@ -101,8 +100,8 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(standardRuleset.tally(p2, 0), 30e18, "Against tally on p2");
     }
 
-    /// @dev D27's array-return rationale is distinct per-proposal snapshots → potentially
-    ///      distinct weights. Prove it: carol's balance changes between the two proposals'
+    /// @dev The function returns an array because proposals have distinct snapshots →
+    ///      potentially distinct weights. Prove it: carol's balance changes between the two proposals'
     ///      snapshots, so a single batch call must report two different weights, each read
     ///      at its own proposal's snapshot block.
     function test_castVoteBatch_weightsFollowEachProposalsSnapshot() public {
@@ -123,7 +122,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(standardRuleset.tally(p2, 1), 50e18, "p2 tally matches its own snapshot");
     }
 
-    // ─────────────────────────── 2. Guards (D29) ───────────────────────────
+    // ─────────────────────────── 2. Guards ───────────────────────────
 
     function test_castVoteBatch_emptyBatchReverts() public {
         vm.expectRevert(GovernorNexus.EmptyBatch.selector);
@@ -146,12 +145,12 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         governor.castVoteBatch(new uint256[](2), new uint8[](2), new string[](2), new bytes[](1));
     }
 
-    // ─────────────────────────── 3. Nonce spend (D30) ───────────────────────────
+    // ─────────────────────────── 3. Nonce spend ───────────────────────────
 
     /// @dev A batch is a direct cast: it must invalidate the voter's outstanding signed
-    ///      ballots, exactly like the single-vote D21 overrides. Without this, the batch
-    ///      path reopens the Nexus 2 audit-panel Medium (stale relayer ballot overriding a
-    ///      later direct vote).
+    ///      ballots, exactly like the single-vote nonce-spending overrides. Without this,
+    ///      the batch path reintroduces the stale-ballot override: a relayer could land a
+    ///      previously signed ballot on top of the voter's later direct vote.
     function test_castVoteBatch_invalidatesOutstandingSignedBallot() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
         _fund(signer, 30e18);
@@ -161,7 +160,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         uint256 p2 = _proposeActive(2, "held ballot", 0);
 
         // Signer hands a relayer a For ballot on p2, then changes their mind and
-        // batch-votes (on p1 only — the nonce is account-global, D21).
+        // batch-votes (on p1 only — the nonce is account-global).
         bytes memory pendingFor = _signBallot(p2, 1, signer, signerKey, governor.nonces(signer));
 
         uint256[] memory ids = new uint256[](1);
@@ -199,7 +198,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         return abi.encodePacked(r, s, v);
     }
 
-    // ─────────────────────── 4. Duplicates & re-votes (D32) ───────────────────────
+    // ─────────────────────── 4. Duplicates & re-votes ───────────────────────
 
     /// @dev Under mutable votes a duplicate id inside one batch is a valid same-tx
     ///      re-vote, last-wins. Both entries emit VoteCast and both report a weight;
@@ -242,7 +241,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(standardRuleset.tally(p2, 1), 30e18, "fresh vote lands");
     }
 
-    // ─────────────────────── 5. All-or-nothing (D29) ───────────────────────
+    // ─────────────────────── 5. All-or-nothing ───────────────────────
 
     /// @dev One dead id (canceled between signing and inclusion) reverts the other item
     ///      too — no partial state. Recovery is resending without the dead id (idempotent
@@ -294,7 +293,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         assertEq(rs1.tally(p1, 1), 0);
     }
 
-    // ─────────────────────── 6. Params passthrough (D27) ───────────────────────
+    // ─────────────────────── 6. Params passthrough ───────────────────────
 
     /// @dev Empty params[i] → stock VoteCast; non-empty → VoteCastWithParams (OZ's own
     ///      dispatch in _castVote — no code of ours). StandardRuleset ignores params, so
@@ -369,8 +368,8 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         }
     }
 
-    /// @dev In-EVM gas comparison for the verdict. The batch saves (N-1) nonce bumps (D30
-    ///      vs D21-per-single) in-EVM, but the measured in-EVM delta can be slightly
+    /// @dev In-EVM gas comparison. The batch saves (N-1) nonce bumps (one spend per batch
+    ///      vs one per single cast) in-EVM, but the measured in-EVM delta can be slightly
     ///      negative (array ABI-decoding overhead can exceed those saved nonce bumps) — the
     ///      assertion below is intrinsic-adjusted, crediting the (N-1) avoided per-tx 21k
     ///      intrinsic costs that a single-EVM-call harness cannot otherwise see. Real-world
@@ -405,7 +404,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         // In-EVM, a batch can cost slightly MORE than N singles (array ABI-decoding overhead
         // exceeds the (N-1) saved nonce bumps). The real saving is off-EVM: (N-1) avoided
         // per-tx intrinsic costs (21k each) + top-level calldata. Assert the real-world win
-        // with the intrinsic adjustment; exact numbers go to the milestone verdict.
+        // with the intrinsic adjustment; the logs above report the exact numbers.
         assertLt(batchGas, singlesGas + 4 * 21_000, "batch must beat 5 singles once avoided intrinsic gas is counted");
     }
 }
