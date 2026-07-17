@@ -425,8 +425,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     }
 
     // ──────────────── Governor / extension overrides (pure disambiguation) ────────────────
-    // Solidity requires an explicit override when two direct bases declare the same
-    // function; every function here only forwards to `super`, adding no behavior.
 
     /// @inheritdoc IGovernor
     function proposalDeadline(uint256 proposalId)
