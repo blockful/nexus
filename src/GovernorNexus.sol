@@ -46,9 +46,13 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
 
     /// @dev Ids of the proposer's tracked proposals, lazily pruned of entries that left
     ///      Pending|Active on the proposer's next propose. Invariant-bounded: an id is
-    ///      pushed only after {_pruneAndCheckActiveLimit} passes, so length can never
-    ///      exceed `_maxActiveProposals` — propose gas is O(cap), independent of global
-    ///      state, and no entry exists for an address that never proposed.
+    ///      pushed only after {_pruneAndCheckActiveLimit} passes against the cap in effect
+    ///      at that moment, so length can never exceed `MAX_ACTIVE_PROPOSALS_CEILING` —
+    ///      propose gas is O(ceiling), independent of global state, and no entry exists
+    ///      for an address that never proposed. NOT bounded by the live
+    ///      `_maxActiveProposals`: lowering the cap via {setMaxActiveProposals} does not
+    ///      retroactively prune already-tracked ids, so a proposer's tracked length can
+    ///      transiently exceed the new cap until enough of their live proposals resolve.
     mapping(address proposer => uint256[] proposalIds) private _activeProposals;
 
     /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals.
