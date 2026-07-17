@@ -206,4 +206,39 @@ contract ParityDivergencesTest is BaseTest {
         assertEq(against, weight, "and is counted exactly once in Against");
         assertTrue(scaffoldGov.hasVoted(scaffoldId, WHALE), "the whale still has a standing vote");
     }
+
+    /// BEHAVIORAL divergence #5 (Nexus 3, D33/D34) — the second deliberate RFC mechanism: a
+    /// failing→passing flip inside the final `extensionWindow` (24h) extends Nexus voting by
+    /// `extensionDuration` (48h) past the ORIGINAL deadline; the live governor closes on
+    /// schedule regardless of when the outcome flipped. Here the flip is the simplest kind:
+    /// the proposal sits failing (no votes → quorum unmet) until the WHALE flips it passing
+    /// inside the window.
+    function test_divergence_lateFlipExtendsNexusButNotLive() public {
+        uint256 liveId = _propose(liveGov, liveBox, 2, "late flip");
+        uint256 scaffoldId = _propose(scaffoldGov, scaffoldBox, 2, "late flip");
+        vm.roll(liveGov.proposalSnapshot(liveId) + 1);
+
+        uint256 liveDeadline = liveGov.proposalDeadline(liveId);
+        uint256 scaffoldDeadline = scaffoldGov.proposalDeadline(scaffoldId);
+        assertEq(scaffoldDeadline, liveDeadline, "identical periods before any flip");
+
+        // Flip failing→passing inside the final window, same block on both governors.
+        vm.roll(scaffoldDeadline - 100);
+        vm.startPrank(WHALE);
+        liveGov.castVote(liveId, 1);
+        scaffoldGov.castVote(scaffoldId, 1);
+        vm.stopPrank();
+
+        vm.roll(scaffoldDeadline + 1);
+        // Live: decided at the original deadline, snipe window and all.
+        assertEq(liveGov.proposalDeadline(liveId), liveDeadline, "live never extends");
+        assertEq(liveGov.state(liveId), 4, "live is already Succeeded"); // ProposalState.Succeeded
+        // Nexus: 48h of response time, anchored at the original deadline (D34).
+        assertEq(
+            scaffoldGov.proposalDeadline(scaffoldId),
+            scaffoldDeadline + ENSParams.EXTENSION_DURATION,
+            "nexus extends by the RFC's 48h from the original deadline"
+        );
+        assertEq(scaffoldGov.state(scaffoldId), 1, "nexus voting stays open"); // ProposalState.Active
+    }
 }
