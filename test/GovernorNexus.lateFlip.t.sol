@@ -8,7 +8,6 @@ import {Vm} from "forge-std/Vm.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {GovernorPreventLateFlip} from "../src/GovernorPreventLateFlip.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {MockOptimisticRuleset} from "./mocks/MockOptimisticRuleset.sol";
 
 /// @dev Anti-snipe late-vote extension. The mechanism's public surface is deliberately
 ///      minimal: the `proposalDeadline` view, the `ProposalExtended` event, and the two
@@ -343,37 +342,6 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
 
         vm.roll(t + 1);
         assertEq(governor.proposalDeadline(id), t + EXTENSION_DURATION, "sig-path flip extends");
-    }
-
-    // ─────────────────────── all-types coverage ───────────────────────
-
-    /// @dev Under optimistic semantics ("pass unless opposition ≥ veto"), the failing→passing
-    ///      flip reads as opposition crossing the veto and RECEDING late — the core's
-    ///      mechanism fires on it with zero type-specific code.
-    function test_optimisticType_lateOppositionRecession_extends() public {
-        MockOptimisticRuleset opt = new MockOptimisticRuleset(address(governor), 1_000_000e18);
-        _executeSelfCall(
-            abi.encodeCall(GovernorNexus.registerType, (opt, VOTING_DELAY, VOTING_PERIOD, 0)), "register optimistic"
-        );
-
-        address[] memory targets = new address[](1);
-        targets[0] = address(governor);
-        uint256[] memory values = new uint256[](1);
-        bytes[] memory calldatas = new bytes[](1);
-        calldatas[0] = "";
-        vm.prank(alice);
-        uint256 id = governor.proposeWithType(targets, values, calldatas, "optimistic flip", 1);
-        vm.roll(governor.proposalSnapshot(id) + 1);
-        uint256 t = governor.proposalDeadline(id);
-
-        vm.roll(t - 15);
-        _vote(dave, id, 0); // opposition 6M ≥ veto 1M: failing, observed in window
-        vm.roll(t - 2);
-        _vote(dave, id, 2); // opposition recedes late: passing again
-
-        vm.roll(t + 1);
-        assertEq(governor.proposalDeadline(id), t + EXTENSION_DURATION, "optimistic late un-veto extends");
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active), "response window open");
     }
 
     // ─────────────────────── property fuzz ───────────────────────

@@ -105,7 +105,7 @@ Integrator notes:
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
 | `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
-| `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, F2 oscillation, lazy materialization, all-types coverage |
+| `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
 | `test/ENSGovernor.t.sol` | Unit suite for the Nexus 0 baseline (mock token, ENS-scale params) |
