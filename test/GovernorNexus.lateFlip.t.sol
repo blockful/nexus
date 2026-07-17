@@ -6,6 +6,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {Vm} from "forge-std/Vm.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
+import {GovernorPreventLateFlip} from "../src/GovernorPreventLateFlip.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {MockOptimisticRuleset} from "./mocks/MockOptimisticRuleset.sol";
 
@@ -89,7 +90,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
     }
 
     function test_constructor_revertsOnZeroExtensionParams() public {
-        vm.expectRevert(GovernorNexus.InvalidExtensionConfig.selector);
+        vm.expectRevert(GovernorPreventLateFlip.InvalidExtensionConfig.selector);
         new GovernorNexus(
             "GovernorNexus",
             IVotes(address(token)),
@@ -102,7 +103,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
             EXTENSION_DURATION
         );
 
-        vm.expectRevert(GovernorNexus.InvalidExtensionConfig.selector);
+        vm.expectRevert(GovernorPreventLateFlip.InvalidExtensionConfig.selector);
         new GovernorNexus(
             "GovernorNexus",
             IVotes(address(token)),
