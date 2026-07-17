@@ -9,11 +9,14 @@ dispatching vote-counting to a pluggable external `IRuleset`. Behavioral parity 
 live deployed ENS governor is proven on a mainnet fork, both for the bootstrap ruleset's
 counting semantics and for the governor's day-to-day surface.
 
-Current milestone (Nexus 2): **mutable votes** — while a proposal is open, casting again
-replaces your standing vote (the weight is debited from the old bucket and credited to the
-new one, atomically). This is the first *deliberate* behavioral divergence from the live ENS
-governor, which rejects a second vote; the fork suite pins it as such. Nexus mechanisms
-continue to land milestone by milestone.
+Nexus 2 shipped **mutable votes** — while a proposal is open, casting again replaces your
+standing vote (the weight is debited from the old bucket and credited to the new one,
+atomically). This was the first *deliberate* behavioral divergence from the live ENS
+governor, which rejects a second vote; the fork suite pins it as such.
+
+Current milestone (Nexus 3): the **anti-snipe late-vote extension** — a proposal that flips
+from failing to passing inside the final 24h gets its voting extended once, by 48h past the
+original deadline. Nexus mechanisms continue to land milestone by milestone.
 
 ## Architecture (Nexus 1)
 
@@ -59,11 +62,37 @@ Two consequences follow for integrators:
   nonce is per-account). A stale pre-signed ballot therefore cannot override a later direct vote
   under mutable votes; a relayer needs a fresh signature once the voter acts directly.
 
+## Anti-snipe late-vote extension (Nexus 3)
+
+If a proposal flips from failing to passing inside the final 24h (`extensionWindow`), voting
+is extended once by 48h (`extensionDuration`) — measured from the **original** deadline, so
+flip timing buys no extra calendar time. Both params are constructor immutables in clock
+units; the mechanism lives in the core and reads the pinned ruleset's
+`quorumReached && voteSucceeded`, so every proposal type gets it under its own semantics.
+
+The trigger is a **window low-water mark**, not a one-shot slot: the extension fires iff the
+proposal was observed failing at any point inside the window AND would pass at the original
+deadline. Nothing is armed on a tally crossing — the pattern the counting layer's
+non-monotonicity note forbids — so re-vote oscillation cannot burn the protection; the only
+way to avoid the extension is holding the proposal visibly passing for the entire final
+window, which is itself the intended response time. Voting stays free in both directions
+during the extension; the tally at the extended deadline decides.
+
+Integrator notes:
+
+- **`proposalDeadline` is authoritative** and grows lazily: it returns the original deadline
+  until that deadline passes, then the extended one if the extension holds. No tentative
+  extension is ever shown mid-window (a flip can still revert before the deadline).
+- **`ProposalExtended(proposalId, extendedDeadline)`** (OZ `GovernorPreventLateQuorum` ABI)
+  is emitted by the first cast after the original deadline. If nobody votes during the
+  extension the event never fires — the views (or replaying `VoteCast` tallies against the
+  immutable params) remain the source of truth.
+
 ## Layout
 
 | Path | What |
 |---|---|
-| `src/GovernorNexus.sol` | Nexus 1 governor core — proposal-type registry, per-proposal pin, ruleset dispatch |
+| `src/GovernorNexus.sol` | Nexus 1 governor core — proposal-type registry, per-proposal pin, ruleset dispatch — plus the Nexus 3 **late-flip extension** (window low-water mark, lazy deadline extension) |
 | `src/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
 | `src/RulesetCounting.sol` | Nexus 2 counting base every ruleset inherits — Bravo buckets, per-voter receipts, **mutable votes** (a re-vote replaces the standing vote) |
 | `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
@@ -75,6 +104,7 @@ Two consequences follow for integrators:
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
 | `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
+| `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, F2 oscillation, lazy materialization, all-types coverage |
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
 | `test/ENSGovernor.t.sol` | Unit suite for the Nexus 0 baseline (mock token, ENS-scale params) |
