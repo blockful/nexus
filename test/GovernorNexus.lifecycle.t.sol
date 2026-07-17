@@ -28,6 +28,8 @@ contract GovernorNexusLifecycleTest is Test {
     uint48 internal constant VOTING_DELAY = 1;
     uint32 internal constant VOTING_PERIOD = 50;
     uint256 internal constant PROPOSAL_THRESHOLD = 1e18;
+    uint48 internal constant EXTENSION_WINDOW = 20;
+    uint48 internal constant EXTENSION_DURATION = 40;
 
     uint256 internal constant Q0_NUMERATOR = 20; // default type: quorum = 20e18
     uint256 internal constant Q1_NUMERATOR = 60; // second type: quorum = 60e18
@@ -67,7 +69,9 @@ contract GovernorNexusLifecycleTest is Test {
             standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 

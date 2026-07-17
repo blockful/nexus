@@ -44,6 +44,26 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
 
+    /// @notice Final-window length of the late-flip trigger (Nexus 3, D33/D37), in clock units.
+    uint48 public immutable extensionWindow;
+    /// @notice Length added past the ORIGINAL deadline when the extension fires (D34), in
+    ///         clock units.
+    uint48 public immutable extensionDuration;
+
+    /// @dev Late-flip extension state (D33). Both bits are protection-monotone — they only
+    ///      ever move toward granting the extension, so there is nothing a re-vote sequence
+    ///      can burn (F2). One slot, written at most twice per proposal.
+    struct LateFlipExtension {
+        bool sawFailingInWindow;
+        bool extended;
+    }
+
+    mapping(uint256 proposalId => LateFlipExtension) private _lateFlip;
+
+    /// @notice A proposal's voting period was extended by a late failing→passing flip
+    ///         (OZ `GovernorPreventLateQuorum` ABI, adopted for tooling compatibility — D38).
+    event ProposalExtended(uint256 indexed proposalId, uint64 extendedDeadline);
+
     /// @dev Transaction-scoped propose-time type context (EIP-1153 transient storage, spec
     ///      D10). Holds `typeId + 1` only while `_proposeWithType` runs `super._propose`, so
     ///      `votingDelay()`/`votingPeriod()` serve the typed line values to the stock
@@ -79,6 +99,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
+    /// @notice `votingPeriod` does not exceed `extensionWindow`, which would make the
+    ///         "final window" span the entire vote.
+    error VotingPeriodTooShort(uint32 votingPeriod, uint48 extensionWindow);
+    /// @notice A late-flip extension parameter is zero.
+    error InvalidExtensionConfig();
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
     ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
@@ -99,8 +124,14 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         IRuleset standardRuleset,
         uint48 votingDelay_,
         uint32 votingPeriod_,
-        uint256 proposalThreshold_
+        uint256 proposalThreshold_,
+        uint48 extensionWindow_,
+        uint48 extensionDuration_
     ) Governor(name_) GovernorVotes(token) GovernorTimelockControl(timelock) {
+        if (extensionWindow_ == 0 || extensionDuration_ == 0) revert InvalidExtensionConfig();
+        // Immutables first: _registerType validates votingPeriod against extensionWindow.
+        extensionWindow = extensionWindow_;
+        extensionDuration = extensionDuration_;
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
     }
@@ -154,6 +185,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
+        // A period not exceeding the trigger window would make "the final window" the whole
+        // vote, hollowing out the late-flip semantics (D37).
+        if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
 
         id = typeCount++;
         _types[id] = TypeConfig({
@@ -365,6 +399,101 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         returns (uint256)
     {
         return _rulesetOf(proposalId).countVote(proposalId, account, support, totalWeight, params);
+    }
+
+    // ─────────────────────────── Late-flip extension (Nexus 3) ───────────────────────────
+    // RFC §2.6: a failing→passing flip inside the final `extensionWindow` extends voting once
+    // by `extensionDuration` past the ORIGINAL deadline (D34 — never past flip time). Trigger
+    // (D33, "window low-water mark"): extend iff the proposal was observed failing at any
+    // point inside the window AND would pass at the original deadline. No state is armed on a
+    // tally-crossing event — the one-shot-slot pattern D16 forbids under mutable votes, where
+    // an attacker crosses early, re-votes down, and snipes later with the slot pre-burned
+    // (F2). Both stored bits move only toward GRANTING the extension, so no re-vote sequence
+    // can consume the protection; the only way to avoid it is holding the proposal visibly
+    // passing for the entire final window — which is itself the response time the RFC deems
+    // sufficient. Observation is complete because tallies only change inside `_castVote`: a
+    // failing state created by a vote is seen post-count (`_tallyUpdated`), one inherited from
+    // before the window is seen by the first in-window cast's pre-count check, and a window
+    // with no votes cannot contain a flip at all.
+
+    /// @dev "Would the proposal pass if voting closed now" — the exact conjunction `state()`'s
+    ///      post-deadline branch evaluates (D36), dispatched to the pinned ruleset. Reading
+    ///      through the ruleset makes the mechanism type-agnostic: every registered type gets
+    ///      the extension under its own semantics with zero type-specific code here.
+    function _wouldPass(uint256 proposalId) private view returns (bool) {
+        return _quorumReached(proposalId) && _voteSucceeded(proposalId);
+    }
+
+    /// @dev The single observation point, run pre-count (from `_castVote`, seeing the tally a
+    ///      vote is about to change) and post-count (from `_tallyUpdated`, seeing what it
+    ///      changed). In the window: record a failing observation. After the original
+    ///      deadline: materialize the (already-determined) extension on the first cast —
+    ///      freezing the decision BEFORE this vote mutates the tally, which is sound because
+    ///      the tally cannot have changed between the deadline and now (any earlier post-
+    ///      deadline cast would have materialized first). Never reverts (OZ `_tallyUpdated`
+    ///      hard rule); a cast that reaches this while the proposal is not Active is undone
+    ///      wholesale when `super._castVote` reverts, so `extended` only ever commits as true.
+    ///      The in-window bound is computed additively so a nonexistent id (deadline 0)
+    ///      cannot underflow — it falls through untouched to stock existence reverts.
+    function _observeLateFlip(uint256 proposalId) private {
+        uint256 originalDeadline = super.proposalDeadline(proposalId);
+        uint256 current = clock();
+        LateFlipExtension storage lateFlip = _lateFlip[proposalId];
+
+        if (current <= originalDeadline) {
+            if (
+                current + extensionWindow >= originalDeadline && !lateFlip.sawFailingInWindow && !_wouldPass(proposalId)
+            ) {
+                lateFlip.sawFailingInWindow = true;
+            }
+        } else if (!lateFlip.extended && lateFlip.sawFailingInWindow && _wouldPass(proposalId)) {
+            lateFlip.extended = true;
+            // originalDeadline + extensionDuration ≪ 2^64 (both derive from uint48 domains).
+            // forge-lint: disable-next-line(unsafe-typecast)
+            emit ProposalExtended(proposalId, uint64(originalDeadline + extensionDuration));
+        }
+    }
+
+    /// @dev Pre-count observation: sees the tally state this vote is about to change, catching
+    ///      a failing state inherited from before the window and materializing a pending
+    ///      extension before the tally mutates. Internal, so every cast path is covered —
+    ///      including `castVoteBySig`/`castVoteWithReasonAndParamsBySig`, which the D21 public
+    ///      overrides below do not intercept.
+    function _castVote(uint256 proposalId, address account, uint8 support, string memory reason, bytes memory params)
+        internal
+        virtual
+        override
+        returns (uint256)
+    {
+        _observeLateFlip(proposalId);
+        return super._castVote(proposalId, account, support, reason, params);
+    }
+
+    /// @dev Post-count observation: catches the vote that itself CREATES a failing state
+    ///      inside the window (e.g. the dip of a dip-and-recover sequence, spec §5.2).
+    function _tallyUpdated(uint256 proposalId) internal virtual override {
+        super._tallyUpdated(proposalId);
+        _observeLateFlip(proposalId);
+    }
+
+    /// @inheritdoc IGovernor
+    /// @dev Extended lazily past the original deadline (never before it — a mid-window flip
+    ///      can still revert, so nothing is promised early). After the original deadline the
+    ///      answer comes from the materialized bit or, until the first extension-period cast
+    ///      materializes it, from a live read — sound because the tally is frozen from the
+    ///      deadline until that first cast (D38: views are authoritative even if nobody ever
+    ///      votes in the extension and `ProposalExtended` never fires). `state()` needs no
+    ///      override: Active-through-the-extension and the final verdict both follow from
+    ///      this view.
+    function proposalDeadline(uint256 proposalId) public view virtual override returns (uint256) {
+        uint256 originalDeadline = super.proposalDeadline(proposalId);
+        if (clock() <= originalDeadline) return originalDeadline;
+
+        LateFlipExtension storage lateFlip = _lateFlip[proposalId];
+        if (lateFlip.extended || (lateFlip.sawFailingInWindow && _wouldPass(proposalId))) {
+            return originalDeadline + extensionDuration;
+        }
+        return originalDeadline;
     }
 
     // ─────────────────────────── Direct-vote nonce spend (D21) ───────────────────────────

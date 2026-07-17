@@ -24,6 +24,10 @@ abstract contract GovernorNexusTestBase is Test {
     uint48 internal constant VOTING_DELAY = 1;
     uint32 internal constant VOTING_PERIOD = 50;
     uint256 internal constant PROPOSAL_THRESHOLD = 100_000e18;
+    // Late-flip extension params (Nexus 3, D37) scaled to the 50-block test period —
+    // production values are ENSParams.EXTENSION_WINDOW/EXTENSION_DURATION (24h/48h).
+    uint48 internal constant EXTENSION_WINDOW = 20;
+    uint48 internal constant EXTENSION_DURATION = 40;
 
     MockENSToken internal token;
     TimelockController internal timelock;
@@ -55,7 +59,9 @@ abstract contract GovernorNexusTestBase is Test {
             standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 
