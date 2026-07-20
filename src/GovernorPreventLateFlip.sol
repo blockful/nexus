@@ -11,7 +11,7 @@ import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 ///         buys no extra calendar time. Voting stays unrestricted during the extension;
 ///         the tally at the extended deadline decides.
 /// @dev Hardened for mutable (non-monotonic) tallies: the trigger is a window low-water
-///      mark, and both stored bits only move toward GRANTING the extension.
+///      mark, and a proposal's {LateFlipStage} only moves toward GRANTING the extension.
 ///      Integration requirement: every proposal's voting period must exceed
 ///      `extensionWindow` — this contract cannot enforce that generically; validate it
 ///      wherever voting periods are configured.
@@ -22,13 +22,16 @@ abstract contract GovernorPreventLateFlip is Governor {
     ///         units.
     uint48 public immutable extensionDuration;
 
-    /// @dev Both bits only ever move toward granting the extension.
-    struct LateFlipExtension {
-        bool sawFailingInWindow;
-        bool extended;
+    /// @dev Monotone ladder: a proposal's stage only ever moves forward, so no vote
+    ///      sequence can consume the protection. `Extended` is reachable only through
+    ///      `FailingObserved` — "extended without a failing witness" is unrepresentable.
+    enum LateFlipStage {
+        None,
+        FailingObserved,
+        Extended
     }
 
-    mapping(uint256 proposalId => LateFlipExtension) private _lateFlip;
+    mapping(uint256 proposalId => LateFlipStage) private _lateFlipStage;
 
     /// @notice A proposal's voting period was extended by a late failing→passing flip.
     /// @dev Same ABI as OZ `GovernorPreventLateQuorum`'s event, so stock tooling decodes it.
@@ -59,16 +62,15 @@ abstract contract GovernorPreventLateFlip is Governor {
     function _observeLateFlip(uint256 proposalId) private {
         uint256 originalDeadline = super.proposalDeadline(proposalId);
         uint256 current = clock();
-        LateFlipExtension storage lateFlip = _lateFlip[proposalId];
+        bool votingOpen = current <= originalDeadline;
 
-        if (current <= originalDeadline) {
-            if (
-                current + extensionWindow >= originalDeadline && !lateFlip.sawFailingInWindow && !_wouldPass(proposalId)
-            ) {
-                lateFlip.sawFailingInWindow = true;
+        if (votingOpen) {
+            bool inFinalWindow = current + extensionWindow >= originalDeadline;
+            if (inFinalWindow && _lateFlipStage[proposalId] == LateFlipStage.None && !_wouldPass(proposalId)) {
+                _lateFlipStage[proposalId] = LateFlipStage.FailingObserved;
             }
-        } else if (!lateFlip.extended && lateFlip.sawFailingInWindow && _wouldPass(proposalId)) {
-            lateFlip.extended = true;
+        } else if (_lateFlipStage[proposalId] == LateFlipStage.FailingObserved && _wouldPass(proposalId)) {
+            _lateFlipStage[proposalId] = LateFlipStage.Extended;
             // originalDeadline + extensionDuration ≪ 2^64 (both derive from uint48 domains).
             // forge-lint: disable-next-line(unsafe-typecast)
             emit ProposalExtended(proposalId, uint64(originalDeadline + extensionDuration));
@@ -97,13 +99,13 @@ abstract contract GovernorPreventLateFlip is Governor {
 
     /// @inheritdoc Governor
     /// @dev Extended lazily past the original deadline: the answer comes from the
-    ///      materialized bit or, until the first extension-period cast sets it, a live read.
+    ///      materialized stage or, until the first extension-period cast sets it, a live read.
     function proposalDeadline(uint256 proposalId) public view virtual override returns (uint256) {
         uint256 originalDeadline = super.proposalDeadline(proposalId);
         if (clock() <= originalDeadline) return originalDeadline;
 
-        LateFlipExtension storage lateFlip = _lateFlip[proposalId];
-        if (lateFlip.extended || (lateFlip.sawFailingInWindow && _wouldPass(proposalId))) {
+        LateFlipStage stage = _lateFlipStage[proposalId];
+        if (stage == LateFlipStage.Extended || (stage == LateFlipStage.FailingObserved && _wouldPass(proposalId))) {
             return originalDeadline + extensionDuration;
         }
         return originalDeadline;
