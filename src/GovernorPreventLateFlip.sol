@@ -11,8 +11,7 @@ import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 ///         buys no extra calendar time. Voting stays unrestricted during the extension;
 ///         the tally at the extended deadline decides.
 /// @dev Hardened for mutable (non-monotonic) tallies: the trigger is a window low-water
-///      mark, and both stored bits only move toward GRANTING the extension. Design
-///      rationale and soundness proofs: `docs/specs/2026-07-17-nexus3-late-vote-extension.md`.
+///      mark, and both stored bits only move toward GRANTING the extension.
 ///
 ///      Integration requirement: every proposal's voting period must exceed
 ///      `extensionWindow` — this contract cannot enforce that generically; validate it
