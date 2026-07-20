@@ -12,7 +12,6 @@ import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
 ///         the tally at the extended deadline decides.
 /// @dev Hardened for mutable (non-monotonic) tallies: the trigger is a window low-water
 ///      mark, and both stored bits only move toward GRANTING the extension.
-///
 ///      Integration requirement: every proposal's voting period must exceed
 ///      `extensionWindow` — this contract cannot enforce that generically; validate it
 ///      wherever voting periods are configured.
