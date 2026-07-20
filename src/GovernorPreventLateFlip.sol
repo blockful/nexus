@@ -56,9 +56,12 @@ abstract contract GovernorPreventLateFlip is Governor {
     }
 
     /// @dev The single observation point, run pre-count (from `_castVote`) and post-count
-    ///      (from `_tallyUpdated`). Must never revert (`_tallyUpdated` hard rule); the
-    ///      in-window bound is computed additively so a nonexistent id (deadline 0) cannot
-    ///      underflow.
+    ///      (from `_tallyUpdated`). Must never revert on its own arithmetic (`_tallyUpdated`
+    ///      hard rule); the in-window bound is computed additively so a nonexistent id
+    ///      (deadline 0) cannot underflow. It does NOT defend against `_quorumReached`/
+    ///      `_voteSucceeded` themselves reverting — if the governor's implementation of those
+    ///      hooks can revert (e.g. dispatch to pluggable external code), a cast landing inside
+    ///      the final window reverts too, not just post-deadline queries.
     function _observeLateFlip(uint256 proposalId) private {
         uint256 originalDeadline = super.proposalDeadline(proposalId);
         uint256 current = clock();
