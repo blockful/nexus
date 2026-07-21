@@ -60,6 +60,7 @@ abstract contract GovernorNexusTestBase is Test {
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
+            _maxActiveProposals(),
             EXTENSION_WINDOW,
             EXTENSION_DURATION
         );
@@ -72,6 +73,13 @@ abstract contract GovernorNexusTestBase is Test {
 
         _fund(alice, 2_000_000e18);
         vm.roll(block.number + 1);
+    }
+
+    /// @dev Per-proposer live-proposal cap the fixture governor is deployed with. Suites
+    ///      whose scenarios need more simultaneous live proposals from one proposer than
+    ///      the default override this.
+    function _maxActiveProposals() internal pure virtual returns (uint8) {
+        return 2;
     }
 
     function _fund(address account, uint256 amount) internal {

@@ -83,6 +83,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
             // forge-lint: disable-next-line(unsafe-typecast)
             uint32(EXTENSION_WINDOW),
             PROPOSAL_THRESHOLD,
+            2,
             EXTENSION_WINDOW,
             EXTENSION_DURATION
         );
@@ -98,6 +99,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
+            2,
             0,
             EXTENSION_DURATION
         );
@@ -111,6 +113,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
+            2,
             EXTENSION_WINDOW,
             0
         );

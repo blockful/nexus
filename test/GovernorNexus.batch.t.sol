@@ -26,6 +26,12 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         vm.roll(block.number + 1);
     }
 
+    /// @dev Batch scenarios keep up to 5 of alice's proposals live at once (gas benchmark),
+    ///      so the fixture cap must sit above that.
+    function _maxActiveProposals() internal pure override returns (uint8) {
+        return 10;
+    }
+
     // ─────────────────────────── Helpers ───────────────────────────
 
     function _boxCall(uint256 newValue, string memory description)

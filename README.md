@@ -95,6 +95,23 @@ direct vote — it invalidates the voter's outstanding signed ballots across all
 proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
 `reasons[i]`/`params[i]` entries mean "none".
 
+## Spam limit (Nexus 4)
+
+`GovernorNexus` caps how many proposals a single proposer can hold concurrently live —
+`Pending` or `Active`, nothing else: a proposal that already survived its vote (`Queued`)
+does not occupy a slot, and one that's `Canceled`/`Defeated`/`Executed` frees its slot
+immediately. This is a concurrency cap, not a rate limit — it bounds a key's in-flight
+governance-attention footprint, not how often it can propose over time. Enforcement is
+lazy: on each propose, the governor drops any of the proposer's tracked ids that left the
+live set, then reverts if the survivors already fill the cap; a proposal is added to the
+tracked set only after that check passes. The cap is governance-settable
+(`setMaxActiveProposals`) within `1..MAX_ACTIVE_PROPOSALS_CEILING` (10) — zero is rejected
+because it would revert every propose, including the governance proposal needed to raise
+it back — and deploys at 2 for the ENS migration (`ENSParams.MAX_ACTIVE_PROPOSALS`). The
+cap is per-address and, like `proposalThreshold`, does not resist an attacker willing to
+split voting power across multiple addresses — accepted, consistent with every per-address
+proposal cap in production governance (Bravo/Nouns/Uniswap all share this property).
+
 ## Layout
 
 | Path | What |
@@ -111,6 +128,7 @@ proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
 | `test/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
+| `test/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap (Nexus 4) |
 | `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
 | `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
