@@ -120,21 +120,15 @@ abstract contract RulesetCounting is IRuleset {
     }
 
     /// @notice Weight standing in one support bucket of `proposalId`.
-    /// @dev The external, validated boundary: reverts `InvalidVoteType` for a support value this
-    ///      ruleset does not accept — there is no such bucket, and answering zero would read as
-    ///      "no votes" instead. An id this ruleset never counted reads as zero, never reverts.
-    ///      Non-monotonic under re-votes. Trusted internal callers passing a constant support
-    ///      known valid by construction use `_tally` instead, skipping the redundant check.
+    /// @dev The single, validated read path — internal outcome logic and external tooling both use
+    ///      it. Reverts `InvalidVoteType` for a support value this ruleset does not accept: there is
+    ///      no such bucket, and answering zero would read as "no votes" instead. `countVote` writes
+    ///      only to buckets it has already validated, so a populated bucket is always readable here;
+    ///      the revert only fires on a value that was never writable, turning a would-be silent zero
+    ///      into a loud failure. An id this ruleset never counted reads as zero, never reverts.
+    ///      Non-monotonic under re-votes.
     function tally(uint256 proposalId, uint8 support) public view returns (uint256) {
         if (!_isValidSupport(support)) revert InvalidVoteType();
-        return _tally(proposalId, support);
-    }
-
-    /// @dev Unchecked bucket read for a ruleset reading its own declared buckets (constant support
-    ///      values, valid by construction). Keeps `_isValidSupport` off the hot outcome-evaluation
-    ///      path (`quorumReached`/`voteSucceeded` run during queue/execute); the check stays on the
-    ///      public `tally`, which is the only untrusted-input entry.
-    function _tally(uint256 proposalId, uint8 support) internal view returns (uint256) {
         return _tallies[proposalId][support];
     }
 
