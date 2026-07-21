@@ -22,7 +22,10 @@ registered a type's ruleset and parameters never change — only its `active` fl
 registry's default pointer can move, both gated behind governance. Every proposal is
 pinned to exactly one type at creation, for its lifetime; the pin is looked up
 transiently (EIP-1153) only while the stock proposal-creation body runs, so the
-type-scoped delay/period never leak into externally observable state. Counting itself is
+type-scoped delay/period never leak into externally observable state — safe because that
+body makes no state-committing external call while the context is set (its only external
+dispatch, the duplicate-proposal check, reverts unconditionally), so no reentrant reader
+can ever observe the typed values. Counting itself is
 never done by the core — `countVote`, `quorumReached`, `voteSucceeded`, and `hasVoted`
 all dispatch to the proposal's pinned ruleset, an immutable, single-purpose contract the
 DAO can swap per type without touching the governor. `StandardRuleset` is the bootstrap
@@ -93,7 +96,13 @@ Integrator notes:
 all-or-nothing. A batch is a direct cast: it spends the voter's nonce once, so — like any
 direct vote — it invalidates the voter's outstanding signed ballots across all open
 proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
-`reasons[i]`/`params[i]` entries mean "none".
+`reasons[i]`/`params[i]` entries mean "none" — OZ emits `VoteCast` for empty params and
+`VoteCastWithParams` otherwise.
+
+Batching is an explicit function rather than OZ's `Multicall` mixin: the governor's payable
+surface (`execute`/`relay`/`receive`) is exactly what makes Multicall the msg.value-reuse
+bug class, and an explicit signature keeps the batch semantics (single nonce spend,
+all-or-nothing) auditable in one place.
 
 ## Spam limit (Nexus 4)
 
@@ -112,6 +121,41 @@ cap is per-address and, like `proposalThreshold`, does not resist an attacker wi
 split voting power across multiple addresses — accepted, consistent with every per-address
 proposal cap in production governance (Bravo/Nouns/Uniswap all share this property).
 
+## Cancellation
+
+Stock OZ lets only the proposer cancel, and only before voting starts. `GovernorNexus`
+replaces that (via the `_validateCancel` hook — no fork) with two rules:
+
+- **Self-cancel:** the proposer can cancel their own proposal while it is `Pending` or
+  `Active` — before the voting process is finished, not after. Once the vote closes, the
+  outcome belongs to the DAO.
+- **Continuous threshold:** the propose-time threshold is a standing obligation. If the
+  proposer's voting power drops below the **pinned type's** `proposalThreshold`, `cancel()`
+  becomes permissionless — anyone can kill the proposal, in any non-terminal state.
+  That includes `Queued`: cancelling a queued proposal deschedules its timelock operation,
+  so a proposal that passed while its proposer drained their voting power can still be
+  stopped during the timelock delay — the delay's whole purpose. Types registered with a
+  zero threshold (future bond-style or allowlisted paths) never expose this rule.
+
+The voting-power read is `getVotes(proposer, clock() - 1)` — byte-for-byte the propose-time
+check, so "cancellable by anyone" is exactly "could not create this proposal now". This is
+Compound Governor Bravo's production semantics (shipped since 2021), expressed through OZ's
+hook. Design consequences, accepted deliberately:
+
+- **Single-block dips count.** A proposer below threshold for one block (a re-delegation in
+  transit, a transfer-and-return) leaves the proposal cancellable at the next block, even
+  if their power is already back. Griefing-only (nothing is stolen; the proposer can
+  re-propose) and proposer-controlled (keeping the threshold backed is their obligation).
+  No hysteresis and no guardian-exemption role, matching the no-privileged-actors design.
+- **A passed proposal is not immune.** A legitimate `Succeeded`/`Queued` proposal whose
+  proposer dips post-vote can be cancelled by anyone. Accepted as the price of the
+  timelock-delay backstop; Bravo's guardian/whitelist pattern is the known retrofit if this
+  ever bites in practice.
+- **The threshold is the pinned one.** The check reads the proposal's registered type row —
+  content-immutable — never live config and never the ruleset, so a later governance change
+  (new types, moved default) cannot retroactively change any live proposal's cancel
+  exposure, and a malicious ruleset has no say in cancel authorization.
+
 ## Layout
 
 | Path | What |
@@ -129,6 +173,7 @@ proposal cap in production governance (Bravo/Nouns/Uniswap all share this proper
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
 | `test/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap (Nexus 4) |
+| `test/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel (Nexus 5) |
 | `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
 | `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
@@ -161,3 +206,6 @@ describe each mechanism without that vocabulary. The decoder:
 | Nexus 1 | Modular governor core — proposal-type registry + pluggable rulesets |
 | Nexus 2 | Mutable votes — a re-vote replaces the standing vote |
 | Nexus 3 | Anti-snipe late-vote extension ([spec](docs/specs/2026-07-17-nexus3-late-vote-extension.md)) |
+| Nexus 4 | Spam limit — per-proposer cap on concurrently live proposals |
+| Nexus 5 | Cancellation — proposer self-cancel + continuous-threshold permissionless cancel |
+| Nexus 6 | Batch voting — `castVoteWithReasonAndParamsBatch` |
