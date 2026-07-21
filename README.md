@@ -124,33 +124,36 @@ proposal cap in production governance (Bravo/Nouns/Uniswap all share this proper
 ## Cancellation
 
 Stock OZ lets only the proposer cancel, and only before voting starts. `GovernorNexus`
-replaces that (via the `_validateCancel` hook — no fork) with two rules:
+replaces that (via the `_validateCancel` hook — no fork): **cancellation is possible only
+while the proposal is `Pending` or `Active`** — once the voting process finishes, no one
+can cancel, in any state — and within that window two rules apply:
 
-- **Self-cancel:** the proposer can cancel their own proposal while it is `Pending` or
-  `Active` — before the voting process is finished, not after. Once the vote closes, the
-  outcome belongs to the DAO.
+- **Self-cancel:** the proposer can always cancel their own proposal, recovering from
+  mistakes without burning a full voting cycle.
 - **Continuous threshold:** the propose-time threshold is a standing obligation. If the
   proposer's voting power drops below the **pinned type's** `proposalThreshold`, `cancel()`
-  becomes permissionless — anyone can kill the proposal, in any non-terminal state.
-  That includes `Queued`: cancelling a queued proposal deschedules its timelock operation,
-  so a proposal that passed while its proposer drained their voting power can still be
-  stopped during the timelock delay — the delay's whole purpose. Types registered with a
-  zero threshold (future bond-style or allowlisted paths) never expose this rule.
+  becomes permissionless — anyone can kill the proposal while it is still votable. Types
+  registered with a zero threshold (future bond-style or allowlisted paths) never expose
+  this rule.
 
 The voting-power read is `getVotes(proposer, clock() - 1)` — byte-for-byte the propose-time
-check, so "cancellable by anyone" is exactly "could not create this proposal now". This is
-Compound Governor Bravo's production semantics (shipped since 2021), expressed through OZ's
-hook. Design consequences, accepted deliberately:
+check, so "cancellable by anyone" is exactly "could not create this proposal now". The
+clause structure and the prior-block read follow Compound Governor Bravo's production
+semantics (shipped since 2021); the window is deliberately narrower than Bravo's, which
+keeps below-threshold cancel open through `Succeeded`/`Queued` — here a proposal that
+survived its vote is settled, and post-vote outcomes (including a proposer who dips after
+voting ends) belong to execution or to a fresh governance action, not to `cancel()`.
+Design consequences, accepted deliberately:
 
 - **Single-block dips count.** A proposer below threshold for one block (a re-delegation in
   transit, a transfer-and-return) leaves the proposal cancellable at the next block, even
   if their power is already back. Griefing-only (nothing is stolen; the proposer can
   re-propose) and proposer-controlled (keeping the threshold backed is their obligation).
   No hysteresis and no guardian-exemption role, matching the no-privileged-actors design.
-- **A passed proposal is not immune.** A legitimate `Succeeded`/`Queued` proposal whose
-  proposer dips post-vote can be cancelled by anyone. Accepted as the price of the
-  timelock-delay backstop; Bravo's guardian/whitelist pattern is the known retrofit if this
-  ever bites in practice.
+- **No post-vote backstop.** Bravo's wide window lets anyone cancel a queued proposal whose
+  proposer drained their power during the timelock delay; this design trades that backstop
+  away for the guarantee that a passed proposal cannot be griefed out of the queue. The
+  timelock delay remains the DAO's reaction window through its own governance paths.
 - **The threshold is the pinned one.** The check reads the proposal's registered type row —
   content-immutable — never live config and never the ruleset, so a later governance change
   (new types, moved default) cannot retroactively change any live proposal's cancel

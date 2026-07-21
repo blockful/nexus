@@ -553,25 +553,25 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     // ─────────────────────────── Cancel policy ───────────────────────────
 
-    /// @dev Cancel authorization, replacing the stock proposer-only/Pending-only policy:
+    /// @dev Cancel authorization, replacing the stock proposer-only/Pending-only policy.
+    ///      Cancellation is possible only while the proposal is Pending or Active — once
+    ///      voting ends, no one can cancel. Within that window:
     ///
-    ///      1. Self-cancel: the proposer may cancel while the proposal is Pending or Active.
-    ///      2. Continuous threshold: when the pinned type's `proposalThreshold` is nonzero
-    ///         and the proposer's prior-block votes fall below it, anyone may cancel, in
-    ///         every state `_cancel`'s bitmap allows — including Queued, descheduling the
-    ///         timelock operation. Zero-threshold types never expose this clause.
+    ///      1. the proposer may always cancel their own proposal;
+    ///      2. when the pinned type's `proposalThreshold` is nonzero and the proposer's
+    ///         prior-block votes fall below it, anyone may cancel. Zero-threshold types
+    ///         never expose this clause.
     ///
     ///      The votes read mirrors the propose-time check; the accepted consequence is that
     ///      one below-threshold block leaves the proposal cancellable at the next, even if
-    ///      power is already restored. Reads only the pinned registry line and core storage
-    ///      — never the ruleset, no live-mutable config.
+    ///      power is already restored. Beyond `state()`, reads only the pinned registry
+    ///      line and core storage — never the ruleset, no live-mutable config.
     function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
-        address proposer = proposalProposer(proposalId);
+        ProposalState s = state(proposalId);
+        if (s != ProposalState.Pending && s != ProposalState.Active) return false;
 
-        if (caller == proposer) {
-            ProposalState s = state(proposalId);
-            if (s == ProposalState.Pending || s == ProposalState.Active) return true;
-        }
+        address proposer = proposalProposer(proposalId);
+        if (caller == proposer) return true;
 
         uint256 votesThreshold = _types[proposalType(proposalId)].proposalThreshold;
         return votesThreshold > 0 && getVotes(proposer, clock() - 1) < votesThreshold;

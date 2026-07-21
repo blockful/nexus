@@ -10,11 +10,11 @@ import {StandardRuleset} from "../src/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {RevertingViewsRuleset} from "./mocks/MaliciousRulesets.sol";
 
-/// @dev Cancellation policy: the proposer may self-cancel while Pending|Active, and ANYONE
-///      may cancel a proposal whose proposer's prior-block votes fall below the pinned
-///      type's threshold — open through Succeeded/Queued, blocked only by the terminal
-///      states OZ's `_cancel` bitmap already forbids. `bob` is the proposer under test,
-///      `carol` the third-party canceller; `alice` stays on governance-loop duty.
+/// @dev Cancellation policy: cancel is possible only while the proposal is Pending|Active —
+///      by the proposer unconditionally, or by ANYONE when the proposer's prior-block votes
+///      fall below the pinned type's threshold. Once voting ends (Succeeded/Defeated/Queued
+///      and beyond) no one can cancel. `bob` is the proposer under test, `carol` the
+///      third-party canceller; `alice` stays on governance-loop duty.
 contract GovernorNexusCancelTest is GovernorNexusTestBase {
     address internal bob = makeAddr("bob");
     address internal carol = makeAddr("carol");
@@ -172,50 +172,49 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
     }
 
-    function test_belowThreshold_anyoneCancels_succeeded() public {
-        uint256 id = _proposeAs(bob, "p");
-        _reachState(id, "p", IGovernor.ProposalState.Succeeded);
-        _dipBelowThreshold(bob);
-        _cancelAs(carol, "p");
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
+    function test_belowThreshold_votingEnded_uncancellable() public {
+        // once voting ends the proposal is settled for cancellation purposes: below-threshold
+        // proposers no longer expose it, in any post-vote state.
+        IGovernor.ProposalState[3] memory states =
+            [IGovernor.ProposalState.Succeeded, IGovernor.ProposalState.Defeated, IGovernor.ProposalState.Queued];
+        for (uint256 i = 0; i < states.length; ++i) {
+            address proposer = makeAddr(string.concat("ended-proposer", vm.toString(i)));
+            _fund(proposer, 200_000e18);
+            vm.roll(block.number + 1);
+            string memory description = string.concat("ended", vm.toString(i));
+            uint256 id = _proposeAs(proposer, description);
+            _reachState(id, description, states[i]);
+            _dipBelowThreshold(proposer);
+            _expectUnableToCancel(id, carol);
+            _cancelAs(carol, description);
+        }
     }
 
-    function test_belowThreshold_anyoneCancels_queued_andDeschedulesTimelock() public {
+    function test_belowThreshold_queued_staysScheduled() public {
         uint256 id = _proposeAs(bob, "p");
         _reachState(id, "p", IGovernor.ProposalState.Queued);
-        assertTrue(timelock.isOperation(_timelockId("p")));
-
         _dipBelowThreshold(bob);
+
+        _expectUnableToCancel(id, carol);
         _cancelAs(carol, "p");
 
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
-        assertFalse(timelock.isOperation(_timelockId("p")));
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Queued));
+        assertTrue(timelock.isOperation(_timelockId("p")));
     }
 
-    function test_belowThreshold_proposerMayUsePermissionlessClause_postVote() public {
+    function test_belowThreshold_proposerCannotCancel_postVote() public {
         uint256 id = _proposeAs(bob, "p");
         _reachState(id, "p", IGovernor.ProposalState.Succeeded);
         _dipBelowThreshold(bob);
+        _expectUnableToCancel(id, bob);
         _cancelAs(bob, "p");
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
-    }
-
-    function test_belowThreshold_cancelOfDefeatedProposal_succeeds() public {
-        // Bravo-identical noise case: validating on a Defeated proposal is allowed; the
-        // cancel is economically a no-op but not worth a state read to block.
-        uint256 id = _proposeAs(bob, "p");
-        _reachState(id, "p", IGovernor.ProposalState.Defeated);
-        _dipBelowThreshold(bob);
-        _cancelAs(carol, "p");
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
     }
 
     function test_belowThreshold_executedProposal_uncancellable() public {
         uint256 id = _proposeAs(bob, "p");
         _reachState(id, "p", IGovernor.ProposalState.Executed);
         _dipBelowThreshold(bob);
-        // the permissionless clause validates, but OZ's forbidden-state bitmap blocks Executed
-        vm.expectRevert();
+        _expectUnableToCancel(id, carol);
         _cancelAs(carol, "p");
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Executed));
     }
