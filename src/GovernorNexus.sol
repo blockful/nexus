@@ -138,7 +138,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         uint48 votingDelay_,
         uint32 votingPeriod_,
         uint256 proposalThreshold_,
-        uint8 maxActiveProposals_
+        uint8 maxActiveProposals_,
         uint48 extensionWindow_,
         uint48 extensionDuration_
     )

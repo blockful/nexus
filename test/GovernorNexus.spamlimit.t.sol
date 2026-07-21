@@ -170,23 +170,59 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
 
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.InvalidMaxActiveProposals.selector, 0));
         new GovernorNexus(
-            "t", IVotes(address(token)), timelock, ruleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD, 0
+            "t",
+            IVotes(address(token)),
+            timelock,
+            ruleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            0,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
 
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.InvalidMaxActiveProposals.selector, 11));
         new GovernorNexus(
-            "t", IVotes(address(token)), timelock, ruleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD, 11
+            "t",
+            IVotes(address(token)),
+            timelock,
+            ruleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            11,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
     }
 
     function test_constructor_acceptsBounds() public {
         StandardRuleset ruleset = _newRuleset();
         GovernorNexus g1 = new GovernorNexus(
-            "t", IVotes(address(token)), timelock, ruleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD, 1
+            "t",
+            IVotes(address(token)),
+            timelock,
+            ruleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            1,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
         assertEq(g1.maxActiveProposals(), 1);
         GovernorNexus g10 = new GovernorNexus(
-            "t", IVotes(address(token)), timelock, ruleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD, 10
+            "t",
+            IVotes(address(token)),
+            timelock,
+            ruleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            10,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
         assertEq(g10.maxActiveProposals(), 10);
     }

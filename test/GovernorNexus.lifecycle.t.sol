@@ -70,7 +70,7 @@ contract GovernorNexusLifecycleTest is Test {
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
-            2
+            2,
             EXTENSION_WINDOW,
             EXTENSION_DURATION
         );
