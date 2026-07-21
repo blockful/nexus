@@ -9,18 +9,20 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
+import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
 import {IRuleset} from "./IRuleset.sol";
 
 /// @title GovernorNexus
 /// @notice Modular ENS governor core. Replaces OZ's baked-in settings/counting/quorum
 ///         extensions with a governed table of proposal types, each pinning a pluggable
 ///         `IRuleset` plus the propose-time parameters (delay, period, threshold).
-/// @dev Stock OZ v5.6.1 `Governor` + `GovernorVotes` + `GovernorTimelockControl`; the
-///      dropped extensions (`GovernorSettings`, `GovernorCountingSimple`,
+/// @dev Stock OZ v5.6.1 `Governor` + `GovernorVotes` + `GovernorTimelockControl` plus the
+///      in-house `GovernorPreventLateFlip` (anti-snipe deadline extension); the dropped
+///      stock extensions (`GovernorSettings`, `GovernorCountingSimple`,
 ///      `GovernorVotesQuorumFraction`) are supplied here — settings from the default type
 ///      row, counting via ruleset dispatch (Task 4). The type table is append-only and
 ///      content-immutable (spec D5): only `active` toggles and the default pointer move.
-contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
+contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
     /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod` and
     ///         `proposalThreshold` are set once at registration and never mutated;
     ///         `active` is the only mutable field and gates NEW proposals only.
@@ -79,6 +81,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
+    /// @notice `votingPeriod` does not exceed `extensionWindow`, which would make the
+    ///         "final window" span the entire vote.
+    error VotingPeriodTooShort(uint32 votingPeriod, uint48 extensionWindow);
     /// @notice `castVoteWithReasonAndParamsBatch` was called with zero items.
     error EmptyBatch();
     /// @notice `castVoteWithReasonAndParamsBatch` array arguments have different lengths.
@@ -94,6 +99,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @param votingDelay_ Bootstrap type voting delay.
     /// @param votingPeriod_ Bootstrap type voting period; must be non-zero.
     /// @param proposalThreshold_ Bootstrap type proposal threshold.
+    /// @param extensionWindow_ Late-flip trigger window (see `GovernorPreventLateFlip`).
+    /// @param extensionDuration_ Late-flip extension length (see `GovernorPreventLateFlip`).
     /// @dev Registers row 0 under the same guardrails as `registerType` and sets it as the
     ///      default, atomically. No deployer-privileged post-deploy setup exists.
     constructor(
@@ -103,8 +110,15 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         IRuleset standardRuleset,
         uint48 votingDelay_,
         uint32 votingPeriod_,
-        uint256 proposalThreshold_
-    ) Governor(name_) GovernorVotes(token) GovernorTimelockControl(timelock) {
+        uint256 proposalThreshold_,
+        uint48 extensionWindow_,
+        uint48 extensionDuration_
+    )
+        Governor(name_)
+        GovernorVotes(token)
+        GovernorTimelockControl(timelock)
+        GovernorPreventLateFlip(extensionWindow_, extensionDuration_)
+    {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
     }
@@ -158,6 +172,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
+        // Enforces GovernorPreventLateFlip's integration requirement at type registration.
+        if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
 
         id = typeCount++;
         _types[id] = TypeConfig({
@@ -407,6 +423,32 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     {
         _useNonce(_msgSender());
         return super.castVoteWithReasonAndParams(proposalId, support, reason, params);
+    }
+
+    // ──────────────── Governor / extension overrides (pure disambiguation) ────────────────
+
+    /// @inheritdoc IGovernor
+    function proposalDeadline(uint256 proposalId)
+        public
+        view
+        virtual
+        override(Governor, GovernorPreventLateFlip)
+        returns (uint256)
+    {
+        return super.proposalDeadline(proposalId);
+    }
+
+    function _castVote(uint256 proposalId, address account, uint8 support, string memory reason, bytes memory params)
+        internal
+        virtual
+        override(Governor, GovernorPreventLateFlip)
+        returns (uint256)
+    {
+        return super._castVote(proposalId, account, support, reason, params);
+    }
+
+    function _tallyUpdated(uint256 proposalId) internal virtual override(Governor, GovernorPreventLateFlip) {
+        super._tallyUpdated(proposalId);
     }
 
     // ─────────────────────────── Batch voting ───────────────────────────
