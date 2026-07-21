@@ -553,19 +553,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     // ─────────────────────────── Cancel policy ───────────────────────────
 
-    /// @dev Cancel authorization, replacing the stock proposer-only/Pending-only policy.
-    ///      Cancellation is possible only while the proposal is Pending or Active — once
-    ///      voting ends, no one can cancel. Within that window:
-    ///
-    ///      1. the proposer may always cancel their own proposal;
-    ///      2. when the pinned type's `proposalThreshold` is nonzero and the proposer's
-    ///         prior-block votes fall below it, anyone may cancel. Zero-threshold types
-    ///         never expose this clause.
-    ///
-    ///      The votes read mirrors the propose-time check; the accepted consequence is that
-    ///      one below-threshold block leaves the proposal cancellable at the next, even if
-    ///      power is already restored. Beyond `state()`, reads only the pinned registry
-    ///      line and core storage — never the ruleset, no live-mutable config.
+    /// @dev Cancel authorization: only while the proposal is Pending or Active — by the
+    ///      proposer, or by anyone when the pinned type's `proposalThreshold` is nonzero
+    ///      and the proposer's prior-block votes fall below it.
     function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
         ProposalState s = state(proposalId);
         if (s != ProposalState.Pending && s != ProposalState.Active) return false;
