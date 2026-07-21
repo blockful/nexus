@@ -594,6 +594,44 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         }
     }
 
+    // ─────────────────────────── Cancel policy ───────────────────────────
+
+    /// @dev Replaces the stock proposer-only/Pending-only policy with two clauses:
+    ///
+    ///      1. Self-cancel: the proposer may cancel while the proposal is Pending or
+    ///         Active — before the voting process is finished, not after (post-vote
+    ///         outcomes belong to the DAO, not to proposer regret).
+    ///      2. Continuous threshold: when the pinned type's `proposalThreshold` is nonzero
+    ///         and the proposer's prior-block votes fall below it, ANYONE may cancel — in
+    ///         any state; the terminal ones (`Canceled`/`Expired`/`Executed`) are already
+    ///         forbidden downstream by `_cancel`'s state bitmap, so a queued proposal whose
+    ///         proposer no longer holds the threshold can still be killed during the
+    ///         timelock delay. Types registered with a zero threshold never expose this
+    ///         clause.
+    ///
+    ///      The votes read is `getVotes(proposer, clock() - 1)` — byte-for-byte the
+    ///      propose-time check, so "cancellable" is exactly "could not propose this now".
+    ///      The prior-block checkpoint is what defends propose against flash-loan voting
+    ///      power; the flip side is accepted as-is: a proposer below threshold for a single
+    ///      block is cancellable at the next, even if their power is already restored
+    ///      (griefing-only, proposer-controlled, and how GovernorBravo has shipped since
+    ///      2021 — no hysteresis, no guardian exemption).
+    ///
+    ///      Reads only the pinned registry line and core storage — never the ruleset, and
+    ///      no live-mutable config: registering new types cannot change a live proposal's
+    ///      cancel exposure. `state()` is consulted only inside the self-cancel clause.
+    function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
+        address proposer = proposalProposer(proposalId);
+
+        if (caller == proposer) {
+            ProposalState s = state(proposalId);
+            if (s == ProposalState.Pending || s == ProposalState.Active) return true;
+        }
+
+        uint256 votesThreshold = _types[proposalType(proposalId)].proposalThreshold;
+        return votesThreshold > 0 && getVotes(proposer, clock() - 1) < votesThreshold;
+    }
+
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
     // Pure disambiguation between inherited modules; no behavior added.
 
