@@ -22,9 +22,19 @@ interface IRuleset is IERC165 {
     ///      counted is answered from empty-tally defaults, never a revert. That means this
     ///      can read `true` for an uncounted id whenever `quorum(0) == 0` — callers must
     ///      gate on proposal existence (the governor does via `state()`).
+    ///
+    ///      **MAY be non-monotonic.** A mutable-vote ruleset moves weight between buckets while
+    ///      voting is open, so this can flip in *both* directions before the deadline (an
+    ///      immutable-vote ruleset is monotonic — the guarantee is not part of this interface
+    ///      either way). A consumer requiring finality MUST evaluate at/near the deadline and
+    ///      MUST NOT arm one-shot state on a tally-crossing event — an attacker could cross the
+    ///      threshold early, re-vote back below it, and burn a once-only trigger before the
+    ///      crossing that matters.
     function quorumReached(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `proposalId`'s tallied votes satisfy this ruleset's pass/fail rule.
+    /// @dev MAY be non-monotonic under a mutable-vote ruleset — see `quorumReached`. Consumers
+    ///      needing finality must read it at/near the deadline, never arm one-shot state on a flip.
     function voteSucceeded(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `voter` has already cast a vote on `proposalId` under this ruleset.

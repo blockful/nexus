@@ -144,9 +144,11 @@ contract LyingRuleset is AdversarialRulesetBase {
 }
 
 /// @notice Attack: the outcome views (`quorumReached`/`voteSucceeded`) revert.
-/// @dev `state()` calls these only in the deadline-passed branch, so the poison surfaces only
-///      AFTER the voting deadline — the proposal is queryable (Pending/Active) up to then, then
-///      `state()` reverts, which in turn makes queue/execute impossible for that proposal only.
+/// @dev `state()` calls these only in the deadline-passed branch, so voting stays open and
+///      queryable up to the deadline, then `state()` reverts, making queue/execute impossible
+///      for that proposal only. `GovernorPreventLateFlip` also reads these views on every cast
+///      inside the final `extensionWindow`, so `castVote` itself reverts for that slice of the
+///      voting period too — the poison surfaces earlier than the deadline, not only after it.
 contract RevertingViewsRuleset is AdversarialRulesetBase {
     error ViewPoisoned();
 
