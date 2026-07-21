@@ -56,6 +56,8 @@ contract Deploy is Script {
             ENSParams.VOTING_PERIOD,
             ENSParams.PROPOSAL_THRESHOLD,
             ENSParams.MAX_ACTIVE_PROPOSALS
+            ENSParams.EXTENSION_WINDOW,
+            ENSParams.EXTENSION_DURATION
         );
         require(address(governor) == predictedGovernor, "Deploy: governor address prediction failed");
 

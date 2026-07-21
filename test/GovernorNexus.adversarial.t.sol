@@ -192,7 +192,10 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
     ///      (Governor.state, OZ v5.6.1): so the proposal is queryable (Pending, then Active) up
     ///      to the deadline, and state() begins reverting only AFTER it. Queue/execute become
     ///      impossible for this proposal (both route through state()), while the governor's own
-    ///      bookkeeping views keep answering. Other types stay fully functional.
+    ///      bookkeeping views keep answering. Other types stay fully functional. Note: this test
+    ///      never casts a vote, so it doesn't exercise `GovernorPreventLateFlip`'s pre-count
+    ///      hook — see `test_revertingViewsRuleset_blocksCastVoteInsideFinalWindow` below for
+    ///      the earlier failure the late-flip mechanism introduces.
     function test_revertingViewsRuleset_stateRevertsOnlyAfterDeadline() public {
         RevertingViewsRuleset rv = new RevertingViewsRuleset(address(governor));
         uint8 badType = _registerType(rv, 0, "register reverting-views ruleset");
@@ -230,6 +233,33 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
         _rollPastDeadline(victimId);
         _queueAndExecute(vt, vv, vc, vh);
         assertEq(box.value(), 55);
+        assertEq(uint8(_stateOf(victimId)), uint8(IGovernor.ProposalState.Executed));
+    }
+
+    /// @dev `GovernorPreventLateFlip._observeLateFlip` reads the same poisoned views on every
+    ///      cast inside the final `extensionWindow`, so `castVote` reverts there too — widening
+    ///      the blast radius from "post-deadline queries only" to "the final window of voting,
+    ///      plus everything after the deadline". Still contained to this one proposal type.
+    function test_revertingViewsRuleset_blocksCastVoteInsideFinalWindow() public {
+        RevertingViewsRuleset rv = new RevertingViewsRuleset(address(governor));
+        uint8 badType = _registerType(rv, 0, "register reverting-views ruleset (in-window)");
+
+        (uint256 id,,,,) = _proposeActiveBox(1, "poisoned views in-window vote", badType);
+        uint256 deadline = governor.proposalDeadline(id);
+
+        // Inside the final extensionWindow (20 blocks), still before the deadline.
+        vm.roll(deadline - 10);
+        vm.prank(alice);
+        vm.expectRevert(RevertingViewsRuleset.ViewPoisoned.selector);
+        governor.castVote(id, 1);
+
+        // Containment: a type-0 proposal votes and executes normally in the same window.
+        (uint256 victimId, address[] memory vt, uint256[] memory vv, bytes[] memory vc, bytes32 vh) =
+            _proposeActiveBox(66, "in-window victim proposal", 0);
+        _vote(victimId, alice, 1);
+        _rollPastDeadline(victimId);
+        _queueAndExecute(vt, vv, vc, vh);
+        assertEq(box.value(), 66);
         assertEq(uint8(_stateOf(victimId)), uint8(IGovernor.ProposalState.Executed));
     }
 
