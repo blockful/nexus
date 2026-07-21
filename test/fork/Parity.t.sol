@@ -117,10 +117,6 @@ contract ParityTest is BaseTest {
         assertEq(scaffoldGov.state(scaffoldId), liveGov.state(liveId));
     }
 
-    // Re-vote behavior is no longer a parity assertion: Nexus 2 makes votes mutable on purpose
-    // (D13), so the live governor rejects a second vote while GovernorNexus replaces it. The
-    // assertion moved to `ParityDivergencesTest.test_divergence_revoteReplacesInsteadOfReverting`.
-
     // ─────────────────────────── helpers ───────────────────────────
 
     function _queueBoth(uint256 newValue, string memory desc) internal {

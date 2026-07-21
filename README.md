@@ -87,6 +87,14 @@ Integrator notes:
   extension the event never fires — the views (or replaying `VoteCast` tallies against the
   immutable params) remain the source of truth.
 
+
+## Batch voting 
+(`castVoteWithReasonAndParamsBatch`) casts votes on several proposals in one transaction,
+all-or-nothing. A batch is a direct cast: it spends the voter's nonce once, so — like any
+direct vote — it invalidates the voter's outstanding signed ballots across all open
+proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
+`reasons[i]`/`params[i]` entries mean "none".
+
 ## Layout
 
 | Path | What |

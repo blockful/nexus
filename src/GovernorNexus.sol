@@ -84,6 +84,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @notice `votingPeriod` does not exceed `extensionWindow`, which would make the
     ///         "final window" span the entire vote.
     error VotingPeriodTooShort(uint32 votingPeriod, uint48 extensionWindow);
+    /// @notice `castVoteWithReasonAndParamsBatch` was called with zero items.
+    error EmptyBatch();
+    /// @notice `castVoteWithReasonAndParamsBatch` array arguments have different lengths.
+    error BatchLengthMismatch();
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
     ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
@@ -446,6 +450,46 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     function _tallyUpdated(uint256 proposalId) internal virtual override(Governor, GovernorPreventLateFlip) {
         super._tallyUpdated(proposalId);
     }
+
+    // ─────────────────────────── Batch voting ───────────────────────────
+
+    /// @notice Casts votes on several proposals in one transaction (ENS governance RFC §2.3).
+    /// @dev All-or-nothing: any failing item reverts the whole batch. Duplicate ids are
+    ///      valid intra-tx re-votes under mutable votes, last-wins. Empty `reasons[i]` /
+    ///      `params[i]` entries mean "none" — OZ emits `VoteCast` for empty params and
+    ///      `VoteCastWithParams` otherwise. Explicit function rather than `Multicall`:
+    ///      the governor's payable surface (`execute`/`relay`/`receive`) makes Multicall the
+    ///      msg.value-reuse bug class; if a trusted forwarder is ever added, revisit this
+    ///      entry point. Guard order: an all-empty call reverts `EmptyBatch` even when the
+    ///      other array lengths also disagree — the zero-length check runs first and is the
+    ///      more specific diagnosis.
+    function castVoteWithReasonAndParamsBatch(
+        uint256[] calldata proposalIds,
+        uint8[] calldata supportValues,
+        string[] calldata reasons,
+        bytes[] calldata params
+    ) public virtual returns (uint256[] memory weights) {
+        uint256 n = proposalIds.length;
+        if (n == 0) revert EmptyBatch();
+        if (n != supportValues.length || n != reasons.length || n != params.length) {
+            revert BatchLengthMismatch();
+        }
+
+        address voter = _msgSender();
+
+        // A batch is a direct cast — spend the voter's nonce so it invalidates any
+        // outstanding signed ballot, exactly like the single-vote overrides above. The
+        // nonce is account-global, so one spend per batch suffices.
+        _useNonce(voter);
+
+        weights = new uint256[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            weights[i] = _castVote(proposalIds[i], voter, supportValues[i], reasons[i], params[i]);
+        }
+    }
+
+    // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
+    // Pure disambiguation between inherited modules; no behavior added.
 
     /// @inheritdoc IGovernor
     function state(uint256 proposalId)
