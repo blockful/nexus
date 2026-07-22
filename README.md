@@ -174,10 +174,11 @@ Optimism's audited optimistic module advertises, so existing indexer support car
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
 | `test/OptimisticRuleset.t.sol` | Unit + fuzz suite for the optimistic ruleset: veto boundary, validator rules, allowlist setters |
-| `test/GovernorNexus.optimistic.t.sol` | Integration suite: validation gate detection/pinning, optimistic e2e lifecycle, veto-withdrawal × anti-snipe, poisoned-validator containment |
+| `test/GovernorNexus.proposalValidation.t.sol` | Integration suite for the propose-time validation gate (mock validators only): detection/pinning, revert propagation, misbehaving-validator containment |
+| `test/GovernorNexus.optimistic.t.sol` | Integration suite for the optimistic type: validation rules through the gate, allowlist governance loop, e2e lifecycle, veto-withdrawal × anti-snipe |
 | `test/ENSGovernor.t.sol` | Unit suite for the stock baseline (mock token, ENS-scale params) |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
-| `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `Box` test target |
+| `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `ValidatorRulesets`, `Box` test target |
 | `test/fork/` | Mainnet-fork suites: behavioral parity (live governor vs GovernorNexus) + A/B gas benchmark |
 
 ## Build & test

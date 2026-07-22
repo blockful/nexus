@@ -2,100 +2,18 @@
 pragma solidity ^0.8.30;
 
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
-import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IProposalValidator} from "../src/IProposalValidator.sol";
-import {IRuleset} from "../src/IRuleset.sol";
 import {OptimisticRuleset} from "../src/OptimisticRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {Box} from "./mocks/Box.sol";
 
-/// @dev Minimal well-formed ruleset base for the validator-gate mocks below: honest inert
-///      counting surface, so each concrete mock differs from a plain ruleset by exactly its
-///      one validator behavior.
-abstract contract ValidatorMockBase is IRuleset {
-    function countVote(uint256, address, uint8, uint256 weight, bytes calldata) external pure returns (uint256) {
-        return weight;
-    }
-
-    function quorumReached(uint256) external pure returns (bool) {
-        return false;
-    }
-
-    function voteSucceeded(uint256) external pure returns (bool) {
-        return false;
-    }
-
-    function hasVoted(uint256, address) external pure returns (bool) {
-        return false;
-    }
-
-    function quorum(uint256) external pure returns (uint256) {
-        return 0;
-    }
-
-    // solhint-disable-next-line func-name-mixedcase
-    function COUNTING_MODE() external pure returns (string memory) {
-        return "support=bravo&quorum=for";
-    }
-}
-
-/// @dev Attack: `validateProposal` always reverts — a poisoned gate. Containment expected:
-///      only proposes of ITS OWN type brick; every other type is unaffected.
-contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    error ValidatorPoisoned();
-
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
-        revert ValidatorPoisoned();
-    }
-
-    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
-        return interfaceId == type(IRuleset).interfaceId || interfaceId == type(IProposalValidator).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
-    }
-}
-
-/// @dev Attack: `validateProposal` burns all forwarded gas. Same containment expectation.
-contract GasBurnValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
-        for (uint256 i = 0;; ++i) {}
-    }
-
-    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
-        return interfaceId == type(IRuleset).interfaceId || interfaceId == type(IProposalValidator).interfaceId
-            || interfaceId == type(IERC165).interfaceId;
-    }
-}
-
-/// @dev A ruleset whose ERC165 answer for `IProposalValidator` is MUTABLE — impossible for
-///      the immutable rulesets the DAO actually registers, built here to pin that detection
-///      happens once, at registration, and is never re-queried.
-contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    error ShouldNeverRun();
-
-    bool public advertiseValidator;
-
-    function setAdvertiseValidator(bool advertise) external {
-        advertiseValidator = advertise;
-    }
-
-    /// @dev Would brick every propose if the gate ever became live for this type.
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
-        revert ShouldNeverRun();
-    }
-
-    function supportsInterface(bytes4 interfaceId) external view returns (bool) {
-        if (interfaceId == type(IProposalValidator).interfaceId) return advertiseValidator;
-        return interfaceId == type(IRuleset).interfaceId || interfaceId == type(IERC165).interfaceId;
-    }
-}
-
-/// @dev Integration suite for the propose-time validation gate and the optimistic type:
-///      `hasProposalValidation` detection/pinning at registration, validator revert propagation on
-///      the validated propose path, byte-identical behavior for validator-less types, the optimistic
-///      end-to-end lifecycle (zero-vote success, veto defeat), the veto-withdrawal
-///      interaction with the anti-snipe extension, and poisoned-validator containment.
+/// @dev Integration suite for the optimistic type on a live GovernorNexus: the ruleset's
+///      validation rules propagating through the propose-time gate, allowlist entries
+///      landing through the full governance loop, the end-to-end lifecycle (zero-vote
+///      success, veto defeat), and the veto-withdrawal interaction with the anti-snipe
+///      extension. The gate mechanism itself is covered in
+///      `GovernorNexus.proposalValidation.t.sol`.
 contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
     /// @dev OZ `GovernorPreventLateQuorum` event ABI, adopted verbatim by the extension.
     event ProposalExtended(uint256 indexed proposalId, uint64 extendedDeadline);
@@ -164,41 +82,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         governor.castVote(id, support);
     }
 
-    /// @dev Registers `ruleset` as the next type through the governance loop.
-    function _registerRuleset(IRuleset ruleset, string memory description) internal returns (uint8 id) {
-        id = governor.typeCount();
-        _executeSelfCall(
-            abi.encodeCall(GovernorNexus.registerType, (ruleset, VOTING_DELAY, VOTING_PERIOD, uint256(0))), description
-        );
-    }
-
-    // ─────────────────────────── validator detection at registration ───────────────────────────
-
-    function test_registerType_pinsHasProposalValidationTrueForValidatorRuleset() public view {
-        assertTrue(governor.getTypeConfig(OPTIMISTIC_TYPE).hasProposalValidation);
-    }
-
-    function test_registerType_pinsHasProposalValidationFalseForStandardRuleset() public view {
-        assertFalse(
-            governor.getTypeConfig(0).hasProposalValidation, "bootstrap standard type must not have a validator"
-        );
-    }
-
-    function test_hasProposalValidationIsPinnedAtRegistration_neverRequeried() public {
-        ToggleableValidatorRuleset toggleable = new ToggleableValidatorRuleset();
-        // Registered while NOT advertising the validator interface -> hasProposalValidation pinned false.
-        uint8 typeId = _registerRuleset(toggleable, "register toggleable");
-        assertFalse(governor.getTypeConfig(typeId).hasProposalValidation);
-
-        // Flipping the advertisement afterwards must change nothing: the pinned line rules.
-        toggleable.setAdvertiseValidator(true);
-        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
-        vm.prank(alice);
-        uint256 id = governor.proposeWithType(targets, values, calldatas, "post-flip propose", typeId);
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Pending));
-    }
-
-    // ─────────────────────────── validated propose path ───────────────────────────
+    // ─────────────────────────── validation rules through the gate ───────────────────────────
 
     function test_proposeWithType_revertsForNonAllowlistedProposer() public {
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
@@ -227,27 +111,6 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ValueNotAllowed.selector, 0));
         governor.proposeWithType(targets, values, calldatas, "value forbidden", OPTIMISTIC_TYPE);
-    }
-
-    function test_validatorRevertLeavesProposalUncreated() public {
-        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
-        string memory description = "not allowlisted";
-        uint256 wouldBeId = governor.hashProposal(targets, values, calldatas, keccak256(bytes(description)));
-
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ProposerNotAllowed.selector, alice));
-        governor.proposeWithType(targets, values, calldatas, description, OPTIMISTIC_TYPE);
-
-        assertEq(governor.proposalSnapshot(wouldBeId), 0, "rejected proposal must not exist");
-    }
-
-    function test_validatorLessDefaultPathNeverTouchesValidator() public {
-        // Same content, default (standard) type, no allowlist entries anywhere: must pass —
-        // the gate belongs to the optimistic type alone.
-        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
-        vm.prank(alice);
-        uint256 id = governor.propose(targets, values, calldatas, "standard path untouched");
-        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Pending));
     }
 
     // ─────────────────────────── allowlists governed by the timelock ───────────────────────────
@@ -339,7 +202,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         (uint256 id, uint256 originalDeadline) = _proposeOptimistic(1, "late veto withdrawal");
 
         // Veto lands inside the final window (proposal observed failing), then the vetoer
-        // withdraws — the D53 snipe shape the extension exists for.
+        // withdraws — the snipe shape the extension exists for.
         vm.roll(originalDeadline - 5);
         _vote(bob, id, 0);
         _vote(bob, id, 1);
@@ -374,43 +237,5 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
 
         vm.roll(originalDeadline + EXTENSION_DURATION + 1);
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated));
-    }
-
-    // ─────────────────────────── poisoned validator containment ───────────────────────────
-
-    function test_poisonedValidator_bricksOnlyItsOwnType() public {
-        PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset();
-        uint8 poisonedType = _registerRuleset(poisoned, "register poisoned validator");
-        assertTrue(governor.getTypeConfig(poisonedType).hasProposalValidation);
-
-        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
-
-        // Its own type: propose bricked (revert IS the gate's behavior, blast radius = itself).
-        vm.prank(alice);
-        vm.expectRevert(PoisonedValidatorRuleset.ValidatorPoisoned.selector);
-        governor.proposeWithType(targets, values, calldatas, "poisoned type", poisonedType);
-
-        // Default type and the healthy validated type: unaffected.
-        vm.prank(alice);
-        governor.propose(targets, values, calldatas, "default path alive");
-
-        _allowAlice();
-        (address[] memory t2, uint256[] memory v2, bytes[] memory c2) = _boxProposal(2);
-        vm.prank(alice);
-        governor.proposeWithType(t2, v2, c2, "healthy validated type alive", OPTIMISTIC_TYPE);
-    }
-
-    function test_gasBurnValidator_bricksOnlyItsOwnType() public {
-        GasBurnValidatorRuleset gasBurner = new GasBurnValidatorRuleset();
-        uint8 burnType = _registerRuleset(gasBurner, "register gas burner");
-
-        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
-
-        vm.prank(alice);
-        vm.expectRevert();
-        governor.proposeWithType{gas: 2_000_000}(targets, values, calldatas, "gas burn type", burnType);
-
-        vm.prank(alice);
-        governor.propose(targets, values, calldatas, "default path alive after burn");
     }
 }
