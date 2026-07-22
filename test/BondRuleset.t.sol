@@ -10,6 +10,7 @@ import {IRuleset} from "../src/IRuleset.sol";
 import {IProposalValidator} from "../src/IProposalValidator.sol";
 import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {FeeOnTransferToken} from "./mocks/FeeOnTransferToken.sol";
 
 /// @dev Stand-in for the governor: the only surface the unit suite needs is
 ///      `proposalSnapshot` (quorum tests) — settle-path reads are exercised in the
@@ -149,5 +150,84 @@ contract BondRulesetTest is Test {
         assertEq(slash, 0);
         assertEq(against, 0);
         assertTrue(ruleset.voteSucceeded(1));
+    }
+
+    function _lockArgs() internal pure returns (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) {
+        t = new address[](1);
+        t[0] = address(0xBEEF);
+        v = new uint256[](1);
+        c = new bytes[](1);
+        c[0] = "";
+        h = keccak256(bytes("bond proposal"));
+    }
+
+    function _canonicalId(address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h)
+        internal
+        pure
+        returns (uint256)
+    {
+        return uint256(keccak256(abi.encode(t, v, c, h)));
+    }
+
+    function test_validateProposal_locksBond_recordsDelta() public {
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
+        address bob = makeAddr("bob");
+        token.mint(bob, BOND);
+        vm.prank(bob);
+        token.approve(address(ruleset), BOND);
+
+        vm.expectEmit(true, true, false, true);
+        emit BondRuleset.BondLocked(_canonicalId(t, v, c, h), bob, BOND);
+        vm.prank(governorMock);
+        ruleset.validateProposal(bob, t, v, c, h);
+
+        (address proposer, uint96 amount, bool settled) = ruleset.bondOf(_canonicalId(t, v, c, h));
+        assertEq(proposer, bob);
+        assertEq(amount, BOND);
+        assertFalse(settled);
+        assertEq(token.balanceOf(address(ruleset)), BOND);
+    }
+
+    function test_validateProposal_onlyGovernor() public {
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
+        vm.expectRevert(abi.encodeWithSelector(RulesetCounting.Unauthorized.selector, address(this)));
+        ruleset.validateProposal(makeAddr("bob"), t, v, c, h);
+    }
+
+    function test_validateProposal_revertsWithoutApproval() public {
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
+        address bob = makeAddr("bob");
+        token.mint(bob, BOND); // funded but no approve
+        vm.prank(governorMock);
+        vm.expectRevert(); // SafeERC20 insufficient-allowance revert
+        ruleset.validateProposal(bob, t, v, c, h);
+    }
+
+    function test_validateProposal_duplicateLockReverts() public {
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
+        address bob = makeAddr("bob");
+        token.mint(bob, 2 * BOND);
+        vm.prank(bob);
+        token.approve(address(ruleset), 2 * BOND);
+        vm.startPrank(governorMock);
+        ruleset.validateProposal(bob, t, v, c, h);
+        vm.expectRevert(abi.encodeWithSelector(BondRuleset.BondAlreadyLocked.selector, _canonicalId(t, v, c, h)));
+        ruleset.validateProposal(bob, t, v, c, h);
+        vm.stopPrank();
+    }
+
+    function test_validateProposal_feeOnTransfer_recordsMeasuredDelta() public {
+        FeeOnTransferToken feeToken = new FeeOnTransferToken();
+        BondRuleset feeRuleset = new BondRuleset(governorMock, IVotes(address(feeToken)), 1, BOND, treasury);
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
+        address bob = makeAddr("bob");
+        feeToken.mint(bob, BOND);
+        vm.prank(bob);
+        feeToken.approve(address(feeRuleset), BOND);
+        vm.prank(governorMock);
+        feeRuleset.validateProposal(bob, t, v, c, h);
+        (, uint96 amount,) = feeRuleset.bondOf(_canonicalId(t, v, c, h));
+        assertEq(amount, BOND - BOND / 100); // recorded = what actually arrived
+        assertEq(feeToken.balanceOf(address(feeRuleset)), BOND - BOND / 100);
     }
 }

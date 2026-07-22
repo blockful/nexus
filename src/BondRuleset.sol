@@ -155,9 +155,31 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         return tally(proposalId, uint8(VoteType.For)) > rejections;
     }
 
-    // validateProposal / resolveBond — Tasks 5–6.
+    /// @inheritdoc IProposalValidator
+    /// @dev Pulls the bond and records it under the canonical proposalId (same derivation as
+    ///      OZ `hashProposal`). Recorded amount is the measured balance delta, so a
+    ///      non-standard token can never under-collateralize the pool. A duplicate id cannot
+    ///      double-lock: the guard reverts here, and even without it the governor's stock
+    ///      duplicate check reverts the same transaction, unwinding this transfer.
+    function validateProposal(
+        address proposer,
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata calldatas,
+        bytes32 descriptionHash
+    ) external onlyGovernor {
+        uint256 proposalId = uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
+        if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external {
-        revert("NYI");
+        IERC20 erc20 = IERC20(address(token));
+        uint256 balanceBefore = erc20.balanceOf(address(this));
+        erc20.safeTransferFrom(proposer, address(this), bondAmount);
+        uint256 received = erc20.balanceOf(address(this)) - balanceBefore;
+        if (received == 0) revert ZeroBondReceived();
+
+        // received ≤ bondAmount ≤ uint96.max (constructor bound) — cast is safe.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(received), settled: false});
+        emit BondLocked(proposalId, proposer, received);
     }
 }
