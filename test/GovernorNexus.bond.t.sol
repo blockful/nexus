@@ -218,4 +218,81 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         vm.expectRevert(abi.encodeWithSelector(BondRuleset.NoBond.selector, uint256(123)));
         bondRuleset.resolveBond(123);
     }
+
+    // ─────────────────────── Cancel-partition tests (F1, D57, D58) ───────────────────────
+
+    function test_cancel_pending_refunds() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("pending cancel");
+        vm.prank(bob);
+        governor.cancel(t, v, c, h); // still Pending
+        uint256 before = token.balanceOf(bob);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+    }
+
+    function test_cancel_active_forfeitsInFull() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("active cancel");
+        vm.roll(governor.proposalSnapshot(id) + 1); // Active
+        vm.prank(bob);
+        governor.cancel(t, v, c, h);
+        uint256 before = token.balanceOf(address(timelock));
+        vm.expectEmit(true, false, false, true);
+        emit BondRuleset.BondSlashed(id, BOND_AMOUNT, BondRuleset.SlashReason.ActiveSelfCancel);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(address(timelock)), before + BOND_AMOUNT);
+    }
+
+    function test_timelockVeto_forfeits_canceledAtZero() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("vetoed");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        governor.queue(t, v, c, h);
+
+        // Security-council veto: cancel directly on the timelock (GovernorTimelockControl salt).
+        bytes32 salt = bytes20(address(governor)) ^ h;
+        bytes32 opId = timelock.hashOperationBatch(t, v, c, 0, salt);
+        vm.prank(council);
+        timelock.cancel(opId);
+
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
+        assertEq(governor.proposalCanceledAt(id), 0); // never canceled via the governor
+
+        uint256 before = token.balanceOf(address(timelock));
+        vm.expectEmit(true, false, false, true);
+        emit BondRuleset.BondSlashed(id, BOND_AMOUNT, BondRuleset.SlashReason.TimelockVeto);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(address(timelock)), before + BOND_AMOUNT);
+    }
+
+    function test_thirdPartyCancel_impossible_zeroThresholdLine() public {
+        // D60: bond line has proposalThreshold = 0 → permissionless-cancel clause never fires.
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("griefing target");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(eoa); // bob has zero VP — under a thresholded line ANYONE could cancel
+        vm.expectRevert(); // GovernorUnableToCancel
+        governor.cancel(t, v, c, h);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active));
+    }
 }
