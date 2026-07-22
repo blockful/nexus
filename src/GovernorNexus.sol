@@ -27,11 +27,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
     ///         `gated` and `proposalThreshold` are set once at registration and never
     ///         mutated; `active` is the only mutable field and gates NEW proposals only.
-    ///         `gated` is whether the ruleset advertised `IProposalValidator` via ERC165
-    ///         at registration — detected once and pinned here, never re-queried, so what
-    ///         the DAO saw when it approved the type is what runs forever.
-    /// @dev Field order packs `ruleset`+`votingDelay`+`votingPeriod`+`active`+`gated`
-    ///      (20+6+4+1+1 = 32 bytes) into a single slot, `proposalThreshold` into the next.
     struct TypeConfig {
         IRuleset ruleset;
         uint48 votingDelay;
