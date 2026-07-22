@@ -9,6 +9,7 @@ import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {IRuleset} from "../src/IRuleset.sol";
 import {StandardRuleset} from "../src/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
+import {MockProposalValidator} from "./mocks/MockProposalValidator.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — exercises the "165 but wrong interface" guardrail.
 contract Mock165 is IERC165 {
@@ -333,5 +334,64 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         uint256 ghostId = 0xbeef;
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorNonexistentProposal.selector, ghostId));
         governor.proposalRuleset(ghostId);
+    }
+
+    // ─────────────────────────── IProposalValidator gating ───────────────────────────
+
+    function test_registerType_pinsGatedTrue_forValidatorRuleset() public {
+        MockProposalValidator validator = new MockProposalValidator(address(governor), IVotes(address(token)));
+        _executeSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (IRuleset(address(validator)), VOTING_DELAY, VOTING_PERIOD, 0)),
+            "register gated type"
+        );
+        uint8 id = governor.typeCount() - 1;
+        assertTrue(governor.getTypeConfig(id).gated);
+        assertFalse(governor.getTypeConfig(0).gated); // StandardRuleset line untouched
+    }
+
+    function test_proposeWithType_callsValidator_withDescriptionHash() public {
+        MockProposalValidator validator = new MockProposalValidator(address(governor), IVotes(address(token)));
+        _executeSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (IRuleset(address(validator)), VOTING_DELAY, VOTING_PERIOD, 0)),
+            "register gated type"
+        );
+        uint8 id = governor.typeCount() - 1;
+
+        (address[] memory t, uint256[] memory v, bytes[] memory c) = _dummyAction();
+        vm.prank(alice);
+        governor.proposeWithType(t, v, c, "gated proposal", id);
+
+        assertEq(validator.calls(), 1);
+        assertEq(validator.lastProposer(), alice);
+        assertEq(validator.lastDescriptionHash(), keccak256(bytes("gated proposal")));
+    }
+
+    function test_proposeWithType_validatorRevert_blocksCreation() public {
+        MockProposalValidator validator = new MockProposalValidator(address(governor), IVotes(address(token)));
+        _executeSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (IRuleset(address(validator)), VOTING_DELAY, VOTING_PERIOD, 0)),
+            "register gated type"
+        );
+        uint8 id = governor.typeCount() - 1;
+        validator.setShouldRevert(true);
+
+        (address[] memory t, uint256[] memory v, bytes[] memory c) = _dummyAction();
+        vm.prank(alice);
+        vm.expectRevert(MockProposalValidator.ValidatorRejected.selector);
+        governor.proposeWithType(t, v, c, "rejected", id);
+    }
+
+    function test_propose_ungatedType_neverCallsHook() public {
+        (address[] memory t, uint256[] memory v, bytes[] memory c) = _dummyAction();
+        vm.prank(alice);
+        governor.propose(t, v, c, "plain"); // type 0, gated=false — must not revert / not call anything
+    }
+
+    function _dummyAction() internal pure returns (address[] memory t, uint256[] memory v, bytes[] memory c) {
+        t = new address[](1);
+        t[0] = address(0xBEEF);
+        v = new uint256[](1);
+        c = new bytes[](1);
+        c[0] = "";
     }
 }

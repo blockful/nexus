@@ -119,7 +119,7 @@ contract StandardRuleset is RulesetCounting {
     }
 
     /// @inheritdoc IERC165
-    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+    function supportsInterface(bytes4 interfaceId) external pure virtual returns (bool) {
         return interfaceId == type(IRuleset).interfaceId || interfaceId == type(IERC165).interfaceId;
     }
 }

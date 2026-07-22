@@ -10,6 +10,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
+import {IProposalValidator} from "./IProposalValidator.sol";
 import {IRuleset} from "./IRuleset.sol";
 
 /// @title GovernorNexus
@@ -21,15 +22,18 @@ import {IRuleset} from "./IRuleset.sol";
 ///      counting is dispatched to rulesets. The type table is append-only and
 ///      content-immutable: only `active` toggles and the default pointer move.
 contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
-    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod` and
-    ///         `proposalThreshold` are set once at registration and never mutated;
-    ///         `active` is the only mutable field and gates NEW proposals only.
+    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
+    ///         `proposalThreshold` and `gated` are set once at registration and never
+    ///         mutated; `active` is the only mutable field and gates NEW proposals only.
+    /// @dev `gated` is auto-detected via ERC165 against `IProposalValidator` at
+    ///      registration, not caller-supplied.
     struct TypeConfig {
         IRuleset ruleset;
         uint48 votingDelay;
         uint32 votingPeriod;
         uint256 proposalThreshold;
         bool active;
+        bool gated;
     }
 
     mapping(uint8 => TypeConfig) private _types;
@@ -216,7 +220,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
             proposalThreshold: proposalThreshold_,
-            active: true
+            active: true,
+            gated: ERC165Checker.supportsInterface(address(ruleset), type(IProposalValidator).interfaceId)
         });
         emit TypeRegistered(id, ruleset, votingDelay_, votingPeriod_, proposalThreshold_);
     }
@@ -314,6 +319,12 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         // Check-then-record inside the single ProposalCore-writing chokepoint, so no
         // creation door — present or future — can miss either half.
         _pruneAndCheckActiveLimit(proposer);
+
+        TypeConfig storage config = _types[typeId];
+        if (config.gated) {
+            IProposalValidator(address(config.ruleset))
+                .validateProposal(proposer, targets, values, calldatas, keccak256(bytes(description)));
+        }
 
         _typeContext = uint16(typeId) + 1;
         proposalId = super._propose(targets, values, calldatas, description, proposer);
