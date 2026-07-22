@@ -332,4 +332,19 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
         governor.cancel(targets, values, calldatas, descriptionHash);
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
     }
+
+    // ─────────────────────── proposalCanceledAt ───────────────────────
+
+    function test_proposalCanceledAt_zeroBeforeCancel() public {
+        uint256 id = _proposeAs(bob, "canceled-at zero");
+        assertEq(governor.proposalCanceledAt(id), 0);
+    }
+
+    function test_proposalCanceledAt_recordsClockOnSelfCancel() public {
+        uint256 id = _proposeAs(bob, "canceled-at self");
+        vm.roll(block.number + 1); // still Pending
+        uint48 expected = uint48(block.number);
+        _cancelAs(bob, "canceled-at self");
+        assertEq(governor.proposalCanceledAt(id), expected);
+    }
 }
