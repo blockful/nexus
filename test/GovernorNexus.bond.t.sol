@@ -295,4 +295,75 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         governor.cancel(t, v, c, h);
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Active));
     }
+
+    // ─────────────────── Cross-mechanism interaction tests ───────────────────
+
+    /// @dev Batch voting (N6) against bond proposals (N2): one call casts AgainstAndSlash on
+    ///      one proposal and For on another — each bucket lands on its own proposal only.
+    function test_interaction_batchVote_supportThree() public {
+        address slasher = makeAddr("slasher");
+        _fund(slasher, 200_000e18);
+        vm.roll(block.number + 1);
+        (uint256 id1,,,,) = _proposeBonded("batch one");
+        (uint256 id2,,,,) = _proposeBonded("batch two");
+        vm.roll(governor.proposalSnapshot(id2) + 1);
+
+        uint256[] memory pids = new uint256[](2);
+        pids[0] = id1;
+        pids[1] = id2;
+        uint8[] memory supportValues = new uint8[](2);
+        supportValues[0] = uint8(BondRuleset.VoteType.AgainstAndSlash);
+        supportValues[1] = uint8(BondRuleset.VoteType.For);
+        string[] memory reasons = new string[](2);
+        bytes[] memory params = new bytes[](2);
+
+        vm.prank(slasher);
+        governor.castVoteWithReasonAndParamsBatch(pids, supportValues, reasons, params);
+
+        (,,, uint256 slash1) = bondRuleset.proposalVotes(id1);
+        (, uint256 for2,,) = bondRuleset.proposalVotes(id2);
+        assertEq(slash1, 200_000e18);
+        assertEq(for2, 200_000e18);
+    }
+
+    /// @dev Mutable re-vote (N3/RulesetCounting semantics) against a bond proposal (N2): a
+    ///      voter that flips from AgainstAndSlash to For fully drains the slash bucket —
+    ///      the old vote does not linger as residue.
+    function test_interaction_revote_drainsSlashBucket() public {
+        address swinger = makeAddr("swinger");
+        _fund(swinger, 200_000e18);
+        vm.roll(block.number + 1);
+        (uint256 id,,,,) = _proposeBonded("revote");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.startPrank(swinger);
+        governor.castVote(id, uint8(BondRuleset.VoteType.AgainstAndSlash));
+        governor.castVote(id, uint8(BondRuleset.VoteType.For)); // replace — slash bucket back to 0
+        vm.stopPrank();
+        (,,, uint256 slash) = bondRuleset.proposalVotes(id);
+        assertEq(slash, 0);
+    }
+
+    /// @dev Late-flip anti-snipe extension (N3) against a bond proposal (N2), proving the
+    ///      mechanism is type-agnostic (D36). Mirrors the proven trigger from
+    ///      `GovernorNexus.lateFlip.t.sol`: the pre-count observation inside the final
+    ///      `extensionWindow` sees the still-failing tally (alice's earlier Against, not yet
+    ///      overtaken by the flipper's own vote) and arms `FailingObserved`; the assertion
+    ///      is read only after rolling past the original deadline, since the deadline view
+    ///      promises nothing pre-deadline (`test_deadlineViewUnchangedBeforeOriginalDeadline`).
+    function test_interaction_lateFlip_extendsBondProposal() public {
+        // failing → passing inside the window must extend (N3 is type-agnostic, D36)
+        address flipper = makeAddr("flipper");
+        _fund(flipper, 2_500_000e18); // outweighs alice
+        vm.roll(block.number + 1);
+        (uint256 id,,,,) = _proposeBonded("late flip");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Against)); // failing
+        uint256 originalDeadline = governor.proposalDeadline(id);
+        vm.roll(originalDeadline - 5); // inside EXTENSION_WINDOW (20 blocks)
+        vm.prank(flipper);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For)); // flip to passing
+        vm.roll(originalDeadline + 1); // past the original deadline: extension is decided by now
+        assertGt(governor.proposalDeadline(id), originalDeadline);
+    }
 }
