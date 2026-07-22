@@ -92,7 +92,7 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
 }
 
 /// @dev Integration suite for the propose-time validation gate and the optimistic type:
-///      `hasValidator` detection/pinning at registration, validator revert propagation on
+///      `hasProposalValidation` detection/pinning at registration, validator revert propagation on
 ///      the validated propose path, byte-identical behavior for validator-less types, the optimistic
 ///      end-to-end lifecycle (zero-vote success, veto defeat), the veto-withdrawal
 ///      interaction with the anti-snipe extension, and poisoned-validator containment.
@@ -174,19 +174,21 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
 
     // ─────────────────────────── validator detection at registration ───────────────────────────
 
-    function test_registerType_pinsHasValidatorTrueForValidatorRuleset() public view {
-        assertTrue(governor.getTypeConfig(OPTIMISTIC_TYPE).hasValidator);
+    function test_registerType_pinsHasProposalValidationTrueForValidatorRuleset() public view {
+        assertTrue(governor.getTypeConfig(OPTIMISTIC_TYPE).hasProposalValidation);
     }
 
-    function test_registerType_pinsHasValidatorFalseForStandardRuleset() public view {
-        assertFalse(governor.getTypeConfig(0).hasValidator, "bootstrap standard type must not have a validator");
+    function test_registerType_pinsHasProposalValidationFalseForStandardRuleset() public view {
+        assertFalse(
+            governor.getTypeConfig(0).hasProposalValidation, "bootstrap standard type must not have a validator"
+        );
     }
 
-    function test_hasValidatorIsPinnedAtRegistration_neverRequeried() public {
+    function test_hasProposalValidationIsPinnedAtRegistration_neverRequeried() public {
         ToggleableValidatorRuleset toggleable = new ToggleableValidatorRuleset();
-        // Registered while NOT advertising the validator interface -> hasValidator pinned false.
+        // Registered while NOT advertising the validator interface -> hasProposalValidation pinned false.
         uint8 typeId = _registerRuleset(toggleable, "register toggleable");
-        assertFalse(governor.getTypeConfig(typeId).hasValidator);
+        assertFalse(governor.getTypeConfig(typeId).hasProposalValidation);
 
         // Flipping the advertisement afterwards must change nothing: the pinned line rules.
         toggleable.setAdvertiseValidator(true);
@@ -379,7 +381,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
     function test_poisonedValidator_bricksOnlyItsOwnType() public {
         PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset();
         uint8 poisonedType = _registerRuleset(poisoned, "register poisoned validator");
-        assertTrue(governor.getTypeConfig(poisonedType).hasValidator);
+        assertTrue(governor.getTypeConfig(poisonedType).hasProposalValidation);
 
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
 

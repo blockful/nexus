@@ -25,7 +25,7 @@ import {IRuleset} from "./IRuleset.sol";
 ///      content-immutable (spec D5): only `active` toggles and the default pointer move.
 contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
     /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
-    ///         `hasValidator` and `proposalThreshold` are set once at registration and
+    ///         `hasProposalValidation` and `proposalThreshold` are set once at registration and
     ///         never mutated; `active` is the only mutable field and gates NEW proposals
     ///         only.
     struct TypeConfig {
@@ -33,7 +33,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         uint48 votingDelay;
         uint32 votingPeriod;
         bool active;
-        bool hasValidator;
+        bool hasProposalValidation;
         uint256 proposalThreshold;
     }
 
@@ -231,7 +231,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
             active: true,
-            hasValidator: ERC165Checker.supportsInterface(address(ruleset), type(IProposalValidator).interfaceId),
+            hasProposalValidation: ERC165Checker.supportsInterface(
+                address(ruleset), type(IProposalValidator).interfaceId
+            ),
             proposalThreshold: proposalThreshold_
         });
         emit TypeRegistered(id, ruleset, votingDelay_, votingPeriod_, proposalThreshold_);
@@ -341,7 +343,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         _pruneAndCheckActiveLimit(proposer);
 
         TypeConfig storage config = _types[typeId];
-        if (config.hasValidator) {
+        if (config.hasProposalValidation) {
             IProposalValidator(address(config.ruleset)).validateProposal(proposer, targets, values, calldatas);
         }
 
