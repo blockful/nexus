@@ -131,7 +131,7 @@ reconfigure the system that created it.
 The propose-time hook is the core's one addition: a ruleset advertising
 `IProposalValidator` via ERC165 has `validateProposal(proposer, targets, values,
 calldatas)` called before the proposal is created, and a revert blocks creation.
-Detection happens once, at `registerType`, pinned as `gated` on the content-immutable
+Detection happens once, at `registerType`, pinned as `hasValidator` on the content-immutable
 type line and never re-queried — types whose rulesets don't opt in keep a byte-identical
 propose path. A misbehaving validator can only brick proposing its own type (a revert
 *is* the gate's behavior); other types and the default path never reach it.

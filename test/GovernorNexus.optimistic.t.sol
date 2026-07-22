@@ -92,8 +92,8 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
 }
 
 /// @dev Integration suite for the propose-time validation gate and the optimistic type:
-///      `gated` detection/pinning at registration, validator revert propagation on the
-///      gated propose path, byte-identical behavior for ungated types, the optimistic
+///      `hasValidator` detection/pinning at registration, validator revert propagation on
+///      the validated propose path, byte-identical behavior for validator-less types, the optimistic
 ///      end-to-end lifecycle (zero-vote success, veto defeat), the veto-withdrawal
 ///      interaction with the anti-snipe extension, and poisoned-validator containment.
 contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
@@ -172,21 +172,21 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         );
     }
 
-    // ─────────────────────────── gated detection at registration ───────────────────────────
+    // ─────────────────────────── validator detection at registration ───────────────────────────
 
-    function test_registerType_pinsGatedTrueForValidatorRuleset() public view {
-        assertTrue(governor.getTypeConfig(OPTIMISTIC_TYPE).gated);
+    function test_registerType_pinsHasValidatorTrueForValidatorRuleset() public view {
+        assertTrue(governor.getTypeConfig(OPTIMISTIC_TYPE).hasValidator);
     }
 
-    function test_registerType_pinsGatedFalseForStandardRuleset() public view {
-        assertFalse(governor.getTypeConfig(0).gated, "bootstrap standard type must not be gated");
+    function test_registerType_pinsHasValidatorFalseForStandardRuleset() public view {
+        assertFalse(governor.getTypeConfig(0).hasValidator, "bootstrap standard type must not have a validator");
     }
 
-    function test_gatedIsPinnedAtRegistration_neverRequeried() public {
+    function test_hasValidatorIsPinnedAtRegistration_neverRequeried() public {
         ToggleableValidatorRuleset toggleable = new ToggleableValidatorRuleset();
-        // Registered while NOT advertising the validator interface -> gated pinned false.
+        // Registered while NOT advertising the validator interface -> hasValidator pinned false.
         uint8 typeId = _registerRuleset(toggleable, "register toggleable");
-        assertFalse(governor.getTypeConfig(typeId).gated);
+        assertFalse(governor.getTypeConfig(typeId).hasValidator);
 
         // Flipping the advertisement afterwards must change nothing: the pinned line rules.
         toggleable.setAdvertiseValidator(true);
@@ -196,7 +196,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Pending));
     }
 
-    // ─────────────────────────── gated propose path ───────────────────────────
+    // ─────────────────────────── validated propose path ───────────────────────────
 
     function test_proposeWithType_revertsForNonAllowlistedProposer() public {
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
@@ -239,7 +239,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         assertEq(governor.proposalSnapshot(wouldBeId), 0, "rejected proposal must not exist");
     }
 
-    function test_ungatedDefaultPathNeverTouchesValidator() public {
+    function test_validatorLessDefaultPathNeverTouchesValidator() public {
         // Same content, default (standard) type, no allowlist entries anywhere: must pass —
         // the gate belongs to the optimistic type alone.
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
@@ -379,7 +379,7 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
     function test_poisonedValidator_bricksOnlyItsOwnType() public {
         PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset();
         uint8 poisonedType = _registerRuleset(poisoned, "register poisoned validator");
-        assertTrue(governor.getTypeConfig(poisonedType).gated);
+        assertTrue(governor.getTypeConfig(poisonedType).hasValidator);
 
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _boxProposal(1);
 
@@ -388,14 +388,14 @@ contract GovernorNexusOptimisticTest is GovernorNexusTestBase {
         vm.expectRevert(PoisonedValidatorRuleset.ValidatorPoisoned.selector);
         governor.proposeWithType(targets, values, calldatas, "poisoned type", poisonedType);
 
-        // Default type and the healthy gated type: unaffected.
+        // Default type and the healthy validated type: unaffected.
         vm.prank(alice);
         governor.propose(targets, values, calldatas, "default path alive");
 
         _allowAlice();
         (address[] memory t2, uint256[] memory v2, bytes[] memory c2) = _boxProposal(2);
         vm.prank(alice);
-        governor.proposeWithType(t2, v2, c2, "healthy gated type alive", OPTIMISTIC_TYPE);
+        governor.proposeWithType(t2, v2, c2, "healthy validated type alive", OPTIMISTIC_TYPE);
     }
 
     function test_gasBurnValidator_bricksOnlyItsOwnType() public {
