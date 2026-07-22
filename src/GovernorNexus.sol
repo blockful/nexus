@@ -48,6 +48,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
 
+    /// @dev Timepoint of the governor-path cancel, 0 if never canceled through the governor.
+    ///      A proposal in `Canceled` state with a zero entry was canceled directly on the
+    ///      timelock (security-council veto) — BondRuleset keys its forfeit partition on this.
+    mapping(uint256 proposalId => uint48) private _canceledAt;
+
     /// @dev Ids of the proposer's tracked proposals, lazily pruned on their next propose.
     ///      An id is pushed only after {_pruneAndCheckActiveLimit} passes, so length is
     ///      bounded by the cap in effect at push time (never above the ceiling). Lowering
@@ -247,6 +252,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @dev Inherits the existence check of `proposalType`.
     function proposalRuleset(uint256 proposalId) external view returns (IRuleset) {
         return _types[proposalType(proposalId)].ruleset;
+    }
+
+    /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
+        return _canceledAt[proposalId];
     }
 
     // ─────────────────────────── Propose paths ───────────────────────────
@@ -629,7 +639,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         bytes[] memory calldatas,
         bytes32 descriptionHash
     ) internal virtual override(Governor, GovernorTimelockControl) returns (uint256) {
-        return super._cancel(targets, values, calldatas, descriptionHash);
+        uint256 proposalId = super._cancel(targets, values, calldatas, descriptionHash);
+        _canceledAt[proposalId] = clock();
+        return proposalId;
     }
 
     function _executor() internal view virtual override(Governor, GovernorTimelockControl) returns (address) {
