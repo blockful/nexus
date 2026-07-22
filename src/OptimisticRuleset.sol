@@ -10,24 +10,15 @@ import {RulesetCounting} from "./RulesetCounting.sol";
 /// @title OptimisticRuleset
 /// @notice Pass-by-default ruleset: no quorum, and a proposal succeeds unless the Against
 ///         bucket holds `vetoThreshold` at the deadline — a proposal with zero votes cast
-///         executes. Because the "voters judge the content" filter is gone, safety moves to
-///         propose time (`validateProposal`): only allowlisted proposers, only allowlisted
-///         `(target, selector)` actions, no ETH value. Deploys with empty allowlists; the
-///         DAO votes entries in through standard governance (the setters answer only to
-///         `admin`, the governance executor).
+///         executes. Safety moves to propose time (`validateProposal`): only allowlisted
+///         proposers, only allowlisted `(target, selector)` actions, no ETH value. Deploys
+///         with empty allowlists; the setters answer only to `admin`, the governance
+///         executor.
 /// @dev Counting mechanics (buckets, receipts, replace-on-re-vote) come from
-///      `RulesetCounting`, so the veto is withdrawable: a vetoer re-voting For/Abstain
+///      `RulesetCounting`, so a veto is withdrawable: a vetoer re-voting For/Abstain
 ///      drains the Against bucket and `voteSucceeded` flips back — non-monotonic in both
-///      directions (D16 discipline applies; the governor's anti-snipe extension is the
-///      designated safety net for a late failing→passing flip). Rules are immutable — no
-///      setter can touch the threshold or the validation logic; the allowlist entries are
-///      the one mutable surface, and every mutation costs a full governance pass.
-///
-///      Selector allowlisting bounds WHICH function a proposal may call, never what that
-///      function semantically does — allowlisting a token's `approve` is allowlisting the
-///      spend. Curating entries to genuinely low-risk operations is the DAO's
-///      responsibility; only the governance core itself is refused in code (see
-///      `setActionAllowed`).
+///      directions while voting is open. Threshold and validation logic are immutable;
+///      the allowlist entries are the one mutable surface.
 contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     /// @dev Bravo-style bucket ordering: 0=Against, 1=For, 2=Abstain. Only Against is
     ///      outcome-bearing; For/Abstain are accepted for signal and veto withdrawal.
@@ -37,13 +28,12 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
         Abstain
     }
 
-    /// @notice Governance executor (the timelock) that owns the allowlist setters. NOT the
-    ///         governor: governance executions come from the timelock, so gating on the
-    ///         governor would brick the setters forever.
+    /// @notice Governance executor that owns the allowlist setters. Must be the address
+    ///         governance executions come from (the timelock), NOT the governor —
+    ///         restricting to the governor would make the setters unreachable.
     address public immutable admin;
 
-    /// @notice Absolute Against weight at which a proposal is defeated (RFC deploy value:
-    ///         500k ENS).
+    /// @notice Absolute Against weight at which a proposal is defeated.
     uint256 public immutable vetoThreshold;
 
     /// @notice Accounts allowed to open proposals under this ruleset's type.
@@ -127,12 +117,9 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     /// @notice Allow or disallow proposals under this ruleset's type to call
     ///         `selector` on `target`.
     /// @dev Permanently refuses the governance core as a target — governor, timelock
-    ///      (`admin`), and this ruleset. With any of those allowlisted, a zero-vote
-    ///      proposal could reconfigure governance (expand its own allowlist, move the
-    ///      default type, grant timelock roles): refusing at entry registration makes that
-    ///      escalation unrepresentable rather than merely un-voted-for. The refusal is
-    ///      unconditional on `allowed` — a self-target entry can never exist, so there is
-    ///      nothing to disable.
+    ///      (`admin`), and this ruleset — so a zero-vote proposal can never reconfigure
+    ///      the system that created it. The refusal is unconditional on `allowed`: a
+    ///      self-target entry can never exist, so there is nothing to disable.
     function setActionAllowed(address target, bytes4 selector, bool allowed) external onlyAdmin {
         if (target == governor || target == admin || target == address(this)) {
             revert SelfTargetForbidden(target);
@@ -144,26 +131,23 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     // ─────────────────────────── Outcome rules ───────────────────────────
 
     /// @inheritdoc IRuleset
-    /// @dev Optimistic proposals have no participation requirement, so quorum is
-    ///      unconditionally met — including for ids this ruleset never counted (the
-    ///      interface's no-revert contract; the governor gates existence via `state()`).
+    /// @dev No participation requirement, so quorum is unconditionally met — including
+    ///      for ids this ruleset never counted (the interface's no-revert contract).
     function quorumReached(uint256) external pure returns (bool) {
         return true;
     }
 
     /// @inheritdoc IRuleset
-    /// @dev Pass-by-default: succeeds while Against holds strictly less than
-    ///      `vetoThreshold`; For/Abstain never bear on the outcome. Non-monotonic in BOTH
-    ///      directions under re-votes — a veto is withdrawable — so consumers needing
-    ///      finality must read at the deadline (D16); the governor's anti-snipe extension
-    ///      covers the late failing→passing flip.
+    /// @dev Succeeds while Against holds strictly less than `vetoThreshold`; For/Abstain
+    ///      never bear on the outcome. Non-monotonic in BOTH directions under re-votes —
+    ///      a veto is withdrawable — so consumers needing finality must read at the
+    ///      deadline.
     function voteSucceeded(uint256 proposalId) external view returns (bool) {
         return tally(proposalId, uint8(VoteType.Against)) < vetoThreshold;
     }
 
-    /// @notice Per-bucket tally for `proposalId`, mirroring OZ `GovernorCountingSimple`'s
-    ///         `proposalVotes` (same name and return order) for tooling parity with
-    ///         `StandardRuleset`.
+    /// @notice Against/For/Abstain tallies for `proposalId` — same name and return order
+    ///         as OZ `GovernorCountingSimple`'s `proposalVotes`.
     /// @dev An id this ruleset never counted returns all-zero, never reverts.
     function proposalVotes(uint256 proposalId)
         external
@@ -184,16 +168,14 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     }
 
     /// @inheritdoc IRuleset
-    /// @dev Tooling view only (never outcome logic): no participation is required, so the
-    ///      threshold-to-reach-quorum is zero.
+    /// @dev Tooling view only, never outcome logic: no participation is required, so zero.
     function quorum(uint256) external pure returns (uint256) {
         return 0;
     }
 
     /// @inheritdoc IRuleset
-    /// @dev Verbatim the string Optimism's audited optimistic module advertises, so
-    ///      indexers that understand those proposals decode ours identically. The actual
-    ///      outcome rule (Against-only veto) is documented on `voteSucceeded`.
+    /// @dev All three buckets are tallied; only Against bears on the outcome (see
+    ///      `voteSucceeded`).
     // solhint-disable-next-line func-name-mixedcase
     function COUNTING_MODE() external pure returns (string memory) {
         return "support=bravo&quorum=against,for,abstain";
