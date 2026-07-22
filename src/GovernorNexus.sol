@@ -230,8 +230,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
             active: true,
-            // Rulesets are immutable contracts, so their ERC165 answer is constant: detect
-            // the optional propose-time validator once here and pin it on the line.
             gated: ERC165Checker.supportsInterface(address(ruleset), type(IProposalValidator).interfaceId),
             proposalThreshold: proposalThreshold_
         });
