@@ -112,6 +112,44 @@ cap is per-address and, like `proposalThreshold`, does not resist an attacker wi
 split voting power across multiple addresses — accepted, consistent with every per-address
 proposal cap in production governance (Bravo/Nouns/Uniswap all share this property).
 
+## Optimistic ruleset
+
+`OptimisticRuleset` is a second production ruleset: proposals under its type **pass by
+default** — there is no quorum, and the vote fails only if the Against bucket reaches an
+absolute veto threshold (500k ENS at the intended ENS registration) by the deadline. A
+proposal nobody voted on executes. Because the "voters judge the content" filter is gone,
+safety moves to propose time: the validator enforces that the **proposer is allowlisted**,
+every **`(target, selector)` action is allowlisted**, no action carries **ETH value**, and
+every action has at least a 4-byte selector — checking the three array lengths itself,
+before any indexing, with no reliance on downstream validation. The ruleset deploys with
+**empty allowlists**: day one the optimistic path can do nothing, and the DAO votes
+entries in through standard full-quorum governance (the setters answer only to the
+timelock). The action setter permanently refuses the governance core as a target — the
+governor, the timelock, and the ruleset itself — so a zero-vote proposal can never
+reconfigure the system that created it.
+
+The propose-time hook is the core's one addition: a ruleset advertising
+`IProposalValidator` via ERC165 has `validateProposal(proposer, targets, values,
+calldatas)` called before the proposal is created, and a revert blocks creation.
+Detection happens once, at `registerType`, pinned as `gated` on the content-immutable
+type line and never re-queried — types whose rulesets don't opt in keep a byte-identical
+propose path. A misbehaving validator can only brick proposing its own type (a revert
+*is* the gate's behavior); other types and the default path never reach it.
+
+Two properties are deliberate and documented rather than solved in code:
+
+- **Selector allowlisting bounds *which function* a proposal may call, never what that
+  call semantically does** — allowlisting a token's `approve` is allowlisting the spend.
+  Curating entries down to genuinely low-risk operations is the DAO's responsibility.
+- **The veto is withdrawable** — under mutable votes, a vetoer re-voting For/Abstain
+  drains the Against bucket, so the outcome is non-monotonic in both directions. The
+  snipe this enables (withdraw a standing veto at the last block) is exactly the
+  failing→passing flip the anti-snipe extension fires on: the community gets the full
+  extension window to re-assemble the veto.
+
+`COUNTING_MODE` is `"support=bravo&quorum=against,for,abstain"`, verbatim the string
+Optimism's audited optimistic module advertises, so existing indexer support carries over.
+
 ## Layout
 
 | Path | What |
@@ -121,6 +159,8 @@ proposal cap in production governance (Bravo/Nouns/Uniswap all share this proper
 | `src/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
 | `src/RulesetCounting.sol` | Counting base every ruleset inherits — Bravo buckets, per-voter receipts, **mutable votes** (a re-vote replaces the standing vote) |
 | `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
+| `src/IProposalValidator.sol` | Optional ruleset extension — propose-time content validation hook, ERC165-detected at registration |
+| `src/OptimisticRuleset.sol` | Optimistic ruleset — pass-unless-vetoed outcome + propose-time proposer/action allowlists |
 | `src/ENSGovernor.sol` | Stock OZ v5.6.1 baseline composition, zero custom logic — kept for reference and parity testing |
 | `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
 | `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
@@ -133,6 +173,8 @@ proposal cap in production governance (Bravo/Nouns/Uniswap all share this proper
 | `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
 | `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
 | `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
+| `test/OptimisticRuleset.t.sol` | Unit + fuzz suite for the optimistic ruleset: veto boundary, validator rules, allowlist setters |
+| `test/GovernorNexus.optimistic.t.sol` | Integration suite: validation gate detection/pinning, optimistic e2e lifecycle, veto-withdrawal × anti-snipe, poisoned-validator containment |
 | `test/ENSGovernor.t.sol` | Unit suite for the stock baseline (mock token, ENS-scale params) |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
 | `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `Box` test target |
@@ -161,3 +203,6 @@ describe each mechanism without that vocabulary. The decoder:
 | Nexus 1 | Modular governor core — proposal-type registry + pluggable rulesets |
 | Nexus 2 | Mutable votes — a re-vote replaces the standing vote |
 | Nexus 3 | Anti-snipe late-vote extension ([spec](docs/specs/2026-07-17-nexus3-late-vote-extension.md)) |
+| Nexus 4 | Spam limit — per-proposer cap on concurrently live proposals |
+| Nexus 6 | Batch voting — `castVoteWithReasonAndParamsBatch` |
+| Nexus 7 | Optimistic ruleset — pass-unless-vetoed + the propose-time validation gate ([spec](docs/specs/2026-07-22-nexus7-optimistic-ruleset.md)) |
