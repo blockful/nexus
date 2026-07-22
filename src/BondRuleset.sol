@@ -182,4 +182,63 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(received), settled: false});
         emit BondLocked(proposalId, proposer, received);
     }
+
+    /// @notice Settles `proposalId`'s bond once its outcome is final. Permissionless and
+    ///         one-shot: anyone may trigger settlement, nobody can trigger it twice.
+    /// @dev Refund releases only in terminal states — `Succeeded`/`Queued` revert so the
+    ///      security council's timelock-veto window can never be front-run by an early
+    ///      refund. Effects (settled flag) precede the single transfer (CEI).
+    function resolveBond(uint256 proposalId) external {
+        Bond storage bond = _bonds[proposalId];
+        if (bond.proposer == address(0)) revert NoBond(proposalId);
+        if (bond.settled) revert BondAlreadySettled(proposalId);
+
+        IGovernor.ProposalState currentState = IBondGovernor(governor).state(proposalId);
+
+        if (currentState == IGovernor.ProposalState.Executed) {
+            _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false);
+        } else if (currentState == IGovernor.ProposalState.Defeated) {
+            if (_slashVoted(proposalId, bond.proposer)) {
+                _settle(proposalId, bond, treasury, SlashReason.SlashVote, true);
+            } else {
+                _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false);
+            }
+        } else if (currentState == IGovernor.ProposalState.Canceled) {
+            uint48 canceledAt = IBondGovernor(governor).proposalCanceledAt(proposalId);
+            if (canceledAt != 0 && canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) {
+                _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false); // Pending self-cancel
+            } else if (canceledAt == 0) {
+                _settle(proposalId, bond, treasury, SlashReason.TimelockVeto, true);
+            } else {
+                _settle(proposalId, bond, treasury, SlashReason.ActiveSelfCancel, true);
+            }
+        } else {
+            revert BondNotResolvable(proposalId, currentState);
+        }
+    }
+
+    /// @dev EP 5.15 predicate (D56): rejections beat approvals AND, with the proposer's own
+    ///      standing vote removed from both opposition buckets, slash-weight beats plain-No.
+    function _slashVoted(uint256 proposalId, address proposer) private view returns (bool) {
+        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
+        uint256 againstVotes = tally(proposalId, uint8(VoteType.Against));
+        uint256 slashVotes = tally(proposalId, uint8(VoteType.AgainstAndSlash));
+        if (againstVotes + slashVotes <= forVotes) return false;
+
+        (bool voted, uint8 support, uint256 weight) = voteReceipt(proposalId, proposer);
+        if (voted) {
+            if (support == uint8(VoteType.Against)) againstVotes -= weight;
+            else if (support == uint8(VoteType.AgainstAndSlash)) slashVotes -= weight;
+        }
+        return slashVotes > againstVotes;
+    }
+
+    /// @dev One-shot settle: flag first, single transfer after (CEI).
+    function _settle(uint256 proposalId, Bond storage bond, address to, SlashReason reason, bool slashed) private {
+        bond.settled = true;
+        uint256 amount = bond.amount;
+        IERC20(address(token)).safeTransfer(to, amount);
+        if (slashed) emit BondSlashed(proposalId, amount, reason);
+        else emit BondRefunded(proposalId, bond.proposer, amount);
+    }
 }
