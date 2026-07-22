@@ -136,14 +136,26 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
             || interfaceId == type(IERC165).interfaceId;
     }
 
-    // quorumReached / voteSucceeded — Task 4. validateProposal / resolveBond — Tasks 5–6.
-    function quorumReached(uint256) external view returns (bool) {
-        revert("NYI");
+    /// @inheritdoc IRuleset
+    /// @dev For + Abstain only — AgainstAndSlash is an Against variant and, like Against,
+    ///      never counts toward quorum. Non-monotonic under re-votes (D16).
+    function quorumReached(uint256 proposalId) external view returns (bool) {
+        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
+        uint256 abstainVotes = tally(proposalId, uint8(VoteType.Abstain));
+        uint256 snapshot = IBondGovernor(governor).proposalSnapshot(proposalId);
+        return forVotes + abstainVotes >= quorum(snapshot);
     }
 
-    function voteSucceeded(uint256) external view returns (bool) {
-        revert("NYI");
+    /// @inheritdoc IRuleset
+    /// @dev Rejections are the sum of both Against buckets (EP 5.15: "the sum of rejections").
+    ///      Non-monotonic under re-votes (D16).
+    function voteSucceeded(uint256 proposalId) external view returns (bool) {
+        uint256 rejections =
+            tally(proposalId, uint8(VoteType.Against)) + tally(proposalId, uint8(VoteType.AgainstAndSlash));
+        return tally(proposalId, uint8(VoteType.For)) > rejections;
     }
+
+    // validateProposal / resolveBond — Tasks 5–6.
 
     function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external {
         revert("NYI");

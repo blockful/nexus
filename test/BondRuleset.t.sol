@@ -105,4 +105,49 @@ contract BondRulesetTest is Test {
         assertEq(abstain, 30);
         assertEq(slash, 40);
     }
+
+    function test_voteSucceeded_slashCountsAsOpposition() public {
+        // For 50 vs Against 30 + Slash 30 → rejections 60 > 50 → not succeeded
+        vm.startPrank(governorMock);
+        ruleset.countVote(1, address(1), uint8(BondRuleset.VoteType.For), 50, "");
+        ruleset.countVote(1, address(2), uint8(BondRuleset.VoteType.Against), 30, "");
+        ruleset.countVote(1, address(3), uint8(BondRuleset.VoteType.AgainstAndSlash), 30, "");
+        vm.stopPrank();
+        assertFalse(ruleset.voteSucceeded(1));
+    }
+
+    function test_voteSucceeded_tieIsNotSuccess() public {
+        vm.startPrank(governorMock);
+        ruleset.countVote(1, address(1), uint8(BondRuleset.VoteType.For), 60, "");
+        ruleset.countVote(1, address(2), uint8(BondRuleset.VoteType.AgainstAndSlash), 60, "");
+        vm.stopPrank();
+        assertFalse(ruleset.voteSucceeded(1));
+    }
+
+    function test_quorumReached_ignoresAgainstAndSlash() public {
+        // Give the token real past supply: 1000e18 at the snapshot → quorum (1%) = 10e18.
+        token.mint(makeAddr("holder"), 1000e18);
+        vm.roll(block.number + 1);
+        govStub.setSnapshot(block.number - 1);
+
+        // Slash-only weight 100e18 must NOT satisfy quorum...
+        vm.prank(governorMock);
+        ruleset.countVote(1, address(1), uint8(BondRuleset.VoteType.AgainstAndSlash), 100e18, "");
+        assertFalse(ruleset.quorumReached(1));
+        // ...but 10e18 of Abstain does.
+        vm.prank(governorMock);
+        ruleset.countVote(1, address(2), uint8(BondRuleset.VoteType.Abstain), 10e18, "");
+        assertTrue(ruleset.quorumReached(1));
+    }
+
+    function test_revote_movesWeightAcrossSlashBucket() public {
+        vm.startPrank(governorMock);
+        ruleset.countVote(1, address(1), uint8(BondRuleset.VoteType.AgainstAndSlash), 40, "");
+        ruleset.countVote(1, address(1), uint8(BondRuleset.VoteType.For), 40, ""); // replace
+        vm.stopPrank();
+        (uint256 against,,, uint256 slash) = ruleset.proposalVotes(1);
+        assertEq(slash, 0);
+        assertEq(against, 0);
+        assertTrue(ruleset.voteSucceeded(1));
+    }
 }
