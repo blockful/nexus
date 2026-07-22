@@ -339,12 +339,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         // creation door — present or future — can miss either half.
         _pruneAndCheckActiveLimit(proposer);
 
-        // Propose-time content validation, only for types whose ruleset opted in at
-        // registration (`gated`); a revert blocks creation. Called before `super._propose`
-        // so an invalid proposal fails before any state is written, and before the
-        // transient context is set so the external call can never run under it. Blast
-        // radius of a misbehaving validator: proposes of its own type only — other types
-        // and the default path never reach it (same containment as the counting dispatch).
         TypeConfig storage config = _types[typeId];
         if (config.gated) {
             IProposalValidator(address(config.ruleset)).validateProposal(proposer, targets, values, calldatas);
