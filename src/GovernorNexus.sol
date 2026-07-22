@@ -10,6 +10,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
+import {IProposalValidator} from "./IProposalValidator.sol";
 import {IRuleset} from "./IRuleset.sol";
 
 /// @title GovernorNexus
@@ -23,15 +24,21 @@ import {IRuleset} from "./IRuleset.sol";
 ///      row, counting via ruleset dispatch (Task 4). The type table is append-only and
 ///      content-immutable (spec D5): only `active` toggles and the default pointer move.
 contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
-    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod` and
-    ///         `proposalThreshold` are set once at registration and never mutated;
-    ///         `active` is the only mutable field and gates NEW proposals only.
+    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
+    ///         `gated` and `proposalThreshold` are set once at registration and never
+    ///         mutated; `active` is the only mutable field and gates NEW proposals only.
+    ///         `gated` is whether the ruleset advertised `IProposalValidator` via ERC165
+    ///         at registration — detected once and pinned here, never re-queried, so what
+    ///         the DAO saw when it approved the type is what runs forever.
+    /// @dev Field order packs `ruleset`+`votingDelay`+`votingPeriod`+`active`+`gated`
+    ///      (20+6+4+1+1 = 32 bytes) into a single slot, `proposalThreshold` into the next.
     struct TypeConfig {
         IRuleset ruleset;
         uint48 votingDelay;
         uint32 votingPeriod;
-        uint256 proposalThreshold;
         bool active;
+        bool gated;
+        uint256 proposalThreshold;
     }
 
     mapping(uint8 => TypeConfig) private _types;
@@ -227,8 +234,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
             ruleset: ruleset,
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
-            proposalThreshold: proposalThreshold_,
-            active: true
+            active: true,
+            // Rulesets are immutable contracts, so their ERC165 answer is constant: detect
+            // the optional propose-time validator once here and pin it on the line.
+            gated: ERC165Checker.supportsInterface(address(ruleset), type(IProposalValidator).interfaceId),
+            proposalThreshold: proposalThreshold_
         });
         emit TypeRegistered(id, ruleset, votingDelay_, votingPeriod_, proposalThreshold_);
     }
@@ -335,6 +345,17 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         // Check-then-record inside the single ProposalCore-writing chokepoint, so no
         // creation door — present or future — can miss either half.
         _pruneAndCheckActiveLimit(proposer);
+
+        // Propose-time content validation, only for types whose ruleset opted in at
+        // registration (`gated`); a revert blocks creation. Called before `super._propose`
+        // so an invalid proposal fails before any state is written, and before the
+        // transient context is set so the external call can never run under it. Blast
+        // radius of a misbehaving validator: proposes of its own type only — other types
+        // and the default path never reach it (same containment as the counting dispatch).
+        TypeConfig storage config = _types[typeId];
+        if (config.gated) {
+            IProposalValidator(address(config.ruleset)).validateProposal(proposer, targets, values, calldatas);
+        }
 
         _typeContext = uint16(typeId) + 1;
         proposalId = super._propose(targets, values, calldatas, description, proposer);
