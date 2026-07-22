@@ -9,10 +9,13 @@ import {GovernorNexus} from "../src/GovernorNexus.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
 import {BondRulesetTestBase} from "./BondRulesetTestBase.sol";
 
-/// @dev Drives randomized propose/vote/roll/resolve sequences against the
-///      real governor + BondRuleset and checks conservation: the ruleset's balance always
+/// @dev Drives randomized propose/vote/roll/resolve/queueExecute/cancelGov sequences against
+///      the real governor + BondRuleset and checks conservation: the ruleset's balance always
 ///      covers every unsettled bond, and no bond ever pays out twice.
 contract BondHandler is Test {
+    // Mirrors GovernorNexusTestBase.TIMELOCK_DELAY — the fixture's timelock min-delay.
+    uint256 internal constant TIMELOCK_DELAY = 2 days;
+
     GovernorNexus public governor;
     BondRuleset public ruleset;
     MockENSToken public token;
@@ -23,6 +26,17 @@ contract BondHandler is Test {
     uint256[] public ids;
     mapping(uint256 => bool) public resolvedOnce;
     uint256 public doubleSettles; // must stay 0
+
+    /// @dev Full proposal args per id — needed to drive queue/execute/cancel, which take the
+    ///      (targets, values, calldatas, descriptionHash) tuple rather than the id itself.
+    struct Prop {
+        address[] targets;
+        uint256[] values;
+        bytes[] calldatas;
+        bytes32 descriptionHash;
+    }
+
+    mapping(uint256 => Prop) internal props;
 
     uint256 internal nonce;
 
@@ -43,10 +57,12 @@ contract BondHandler is Test {
         uint256[] memory v = new uint256[](1);
         bytes[] memory c = new bytes[](1);
         c[0] = abi.encodePacked(nonce); // unique calldata → unique id
+        bytes32 descriptionHash = keccak256(bytes(description));
         vm.startPrank(proposerPool);
         token.approve(address(ruleset), ruleset.bondAmount());
         try governor.proposeWithType(t, v, c, description, bondTypeId) returns (uint256 id) {
             ids.push(id);
+            props[id] = Prop({targets: t, values: v, calldatas: c, descriptionHash: descriptionHash});
         } catch {} // spam-limit cap etc. — fine
         vm.stopPrank();
     }
@@ -70,6 +86,30 @@ contract BondHandler is Test {
             if (resolvedOnce[id]) ++doubleSettles;
             resolvedOnce[id] = true;
         } catch {}
+    }
+
+    /// @dev Queue then execute a seed-selected id. Most ids won't be in a queue-able
+    ///      (Succeeded) or execute-able (Queued, past the timelock delay) state — those
+    ///      reverts are expected legal-sequence rejections and are swallowed. This is the
+    ///      only path that drives a bond to `Executed` so `resolveBond`'s Executed branch
+    ///      gets fuzzed.
+    function queueExecute(uint256 idSeed) external {
+        if (ids.length == 0) return;
+        Prop storage p = props[ids[idSeed % ids.length]];
+        try governor.queue(p.targets, p.values, p.calldatas, p.descriptionHash) {} catch {}
+        vm.warp(block.timestamp + TIMELOCK_DELAY + 1);
+        try governor.execute(p.targets, p.values, p.calldatas, p.descriptionHash) {} catch {}
+    }
+
+    /// @dev The bonded proposer self-cancels via the governor. Legal only while
+    ///      Pending/Active (`_validateCancel`); reaches `Canceled` with `proposalCanceledAt`
+    ///      set, so `resolveBond` routes to the Pending-refund or ActiveSelfCancel-forfeit
+    ///      sub-case depending on when cancellation lands relative to the snapshot.
+    function cancelGov(uint256 idSeed) external {
+        if (ids.length == 0) return;
+        Prop storage p = props[ids[idSeed % ids.length]];
+        vm.prank(proposerPool);
+        try governor.cancel(p.targets, p.values, p.calldatas, p.descriptionHash) {} catch {}
     }
 
     function idsLength() external view returns (uint256) {
