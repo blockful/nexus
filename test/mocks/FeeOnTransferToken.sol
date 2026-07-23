@@ -3,10 +3,9 @@ pragma solidity ^0.8.30;
 
 import {MockENSToken} from "./MockENSToken.sol";
 
-/// @dev ERC20Votes mock that burns 1% on every transfer — exercises the measured-delta
-///      custody rule (the bond amount is derived from the balance actually received, not the
-///      amount requested). Never a real deployment concern (ENS is plain); the invariant
-///      must not depend on that assumption.
+/// @dev ERC20Votes mock that burns 1% on every transfer — exercises the under-delivery guard
+///      (a token that delivers less than requested makes a bond lock revert). Never a real
+///      deployment concern (ENS is plain); the guard must not depend on that assumption.
 /// @dev Adaptation: fee logic sits at `transfer`/`transferFrom` rather than `_update` —
 ///      `MockENSToken._update` is not `virtual` (it is the terminal override in that
 ///      contract's chain), so it cannot be overridden further. `transfer`/`transferFrom` are

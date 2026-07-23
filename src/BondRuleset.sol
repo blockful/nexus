@@ -76,7 +76,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     error ZeroTreasury();
     error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
     error BondAlreadyLocked(uint256 proposalId);
-    error ZeroBondReceived();
+    error InsufficientBondReceived();
     error NoBond(uint256 proposalId);
     error BondAlreadySettled(uint256 proposalId);
     error BondNotResolvable(uint256 proposalId, IGovernor.ProposalState state);
@@ -157,7 +157,8 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     }
 
     /// @inheritdoc IProposalValidator
-    /// @dev Pulls the bond and records it under the canonical proposalId.
+    /// @dev Records the bond then pulls it (checks-effects-interactions); reverts if the token
+    ///      delivers less than `bondAmount`, so a fee-on-transfer token can never under-collateralize.
     function validateProposal(
         address proposer,
         address[] calldata targets,
@@ -167,16 +168,18 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     ) external onlyGovernor {
         uint256 proposalId = uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
+
+        // Effect before interaction (CEI); bondAmount ≤ uint96.max by constructor.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(bondAmount), settled: false});
+
         IERC20 erc20 = IERC20(address(token));
         uint256 balanceBefore = erc20.balanceOf(address(this));
+        // slither-disable-next-line arbitrary-send-erc20
         erc20.safeTransferFrom(proposer, address(this), bondAmount);
-        uint256 received = erc20.balanceOf(address(this)) - balanceBefore;
-        if (received == 0) revert ZeroBondReceived();
+        if (erc20.balanceOf(address(this)) - balanceBefore < bondAmount) revert InsufficientBondReceived();
 
-        // received ≤ bondAmount ≤ uint96.max (constructor bound) — cast is safe.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(received), settled: false});
-        emit BondLocked(proposalId, proposer, received);
+        emit BondLocked(proposalId, proposer, bondAmount);
     }
 
     /// @notice Settles `proposalId`'s bond once its outcome is final. Permissionless and

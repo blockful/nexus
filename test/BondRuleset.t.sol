@@ -216,7 +216,7 @@ contract BondRulesetTest is Test {
         vm.stopPrank();
     }
 
-    function test_validateProposal_feeOnTransfer_recordsMeasuredDelta() public {
+    function test_validateProposal_feeOnTransfer_reverts() public {
         FeeOnTransferToken feeToken = new FeeOnTransferToken();
         BondRuleset feeRuleset = new BondRuleset(governorMock, IVotes(address(feeToken)), 1, BOND, treasury);
         (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
@@ -225,9 +225,7 @@ contract BondRulesetTest is Test {
         vm.prank(bob);
         feeToken.approve(address(feeRuleset), BOND);
         vm.prank(governorMock);
+        vm.expectRevert(BondRuleset.InsufficientBondReceived.selector);
         feeRuleset.validateProposal(bob, t, v, c, h);
-        (, uint96 amount,) = feeRuleset.bondOf(_canonicalId(t, v, c, h));
-        assertEq(amount, BOND - BOND / 100); // recorded = what actually arrived
-        assertEq(feeToken.balanceOf(address(feeRuleset)), BOND - BOND / 100);
     }
 }
