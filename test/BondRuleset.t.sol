@@ -12,9 +12,6 @@ import {RulesetCounting} from "../src/RulesetCounting.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
 import {FeeOnTransferToken} from "./mocks/FeeOnTransferToken.sol";
 
-/// @dev Stand-in for the governor: the only surface the unit suite needs is
-///      `proposalSnapshot` (quorum tests) — settle-path reads are exercised in the
-///      integration suite (Task 6) against the real governor.
 contract MockSnapshotGovernor {
     uint256 public snapshot;
 
