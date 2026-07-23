@@ -323,7 +323,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
         TypeConfig storage config = _types[typeId];
         if (config.hasProposalValidation) {
-            IProposalValidator(address(config.ruleset)).validateProposal(proposer, targets, values, calldatas);
+            IProposalValidator(address(config.ruleset)).validateProposal(
+                proposer, targets, values, calldatas, keccak256(bytes(description))
+            );
         }
 
         _typeContext = uint16(typeId) + 1;

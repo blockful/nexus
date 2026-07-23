@@ -44,7 +44,7 @@ abstract contract ValidatorMockBase is IRuleset {
 /// @dev Well-behaved validator: accepts every proposal. The healthy control a containment
 ///      test proposes through while a sibling type's validator is misbehaving.
 contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {}
+    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external pure {}
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return interfaceId == type(IRuleset).interfaceId || interfaceId == type(IProposalValidator).interfaceId
@@ -57,7 +57,7 @@ contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
 contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
     error ValidatorPoisoned();
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
+    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external pure {
         revert ValidatorPoisoned();
     }
 
@@ -69,7 +69,7 @@ contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
 
 /// @dev Attack: `validateProposal` burns all forwarded gas. Same containment expectation.
 contract GasBurnValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
+    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external pure {
         for (uint256 i = 0;; ++i) {}
     }
 
@@ -92,7 +92,7 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
     }
 
     /// @dev Would brick every propose if the gate ever became live for this type.
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata) external pure {
+    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32) external pure {
         revert ShouldNeverRun();
     }
 

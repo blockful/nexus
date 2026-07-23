@@ -91,7 +91,8 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
         address proposer,
         address[] calldata targets,
         uint256[] calldata values,
-        bytes[] calldata calldatas
+        bytes[] calldata calldatas,
+        bytes32
     ) external view onlyGovernor {
         if (targets.length != values.length || values.length != calldatas.length) {
             revert LengthMismatch();
