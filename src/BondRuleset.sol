@@ -40,11 +40,12 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         AgainstAndSlash
     }
 
-    /// @notice Why a bond was forfeited.
+    /// @notice Why a bond was forfeited; `None` marks a refund (no forfeit).
     enum SlashReason {
         SlashVote,
         ActiveSelfCancel,
-        TimelockVeto
+        TimelockVeto,
+        None
     }
 
     /// @notice A locked proposal bond.
@@ -188,28 +189,41 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         if (bond.proposer == address(0)) revert NoBond(proposalId);
         if (bond.settled) revert BondAlreadySettled(proposalId);
 
-        IGovernor.ProposalState currentState = IBondGovernor(governor).state(proposalId);
+        (address to, SlashReason reason, bool slashed) = _bondResolution(proposalId, bond.proposer);
+        _settle(proposalId, bond, to, reason, slashed);
+    }
 
-        if (currentState == IGovernor.ProposalState.Executed) {
-            _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false);
-        } else if (currentState == IGovernor.ProposalState.Defeated) {
-            if (_slashVoted(proposalId, bond.proposer)) {
-                _settle(proposalId, bond, treasury, SlashReason.SlashVote, true);
-            } else {
-                _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false);
-            }
-        } else if (currentState == IGovernor.ProposalState.Canceled) {
-            uint48 canceledAt = IBondGovernor(governor).proposalCanceledAt(proposalId);
-            if (canceledAt != 0 && canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) {
-                _settle(proposalId, bond, bond.proposer, SlashReason.SlashVote, false); // Pending self-cancel
-            } else if (canceledAt == 0) {
-                _settle(proposalId, bond, treasury, SlashReason.TimelockVeto, true);
-            } else {
-                _settle(proposalId, bond, treasury, SlashReason.ActiveSelfCancel, true);
-            }
-        } else {
-            revert BondNotResolvable(proposalId, currentState);
+    /// @dev Maps a terminal proposal state to the bond's destination, reason, and slash flag.
+    ///      Non-terminal states revert, so a refund can never front-run the council's veto window.
+    function _bondResolution(uint256 proposalId, address proposer)
+        private
+        view
+        returns (address to, SlashReason reason, bool slashed)
+    {
+        IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
+        if (state == IGovernor.ProposalState.Executed) return (proposer, SlashReason.None, false);
+        if (state == IGovernor.ProposalState.Defeated) {
+            if (_slashVoted(proposalId, proposer)) return (treasury, SlashReason.SlashVote, true);
+            return (proposer, SlashReason.None, false);
         }
+        if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId, proposer);
+        revert BondNotResolvable(proposalId, state);
+    }
+
+    /// @dev Cancel partition on the recorded cancel timepoint: a self-cancel while still Pending
+    ///      (`0 < canceledAt <= snapshot`) refunds; a council veto (no governor-path timepoint,
+    ///      `canceledAt == 0`) or a self-cancel after voting opened forfeits.
+    function _canceledBondResolution(uint256 proposalId, address proposer)
+        private
+        view
+        returns (address to, SlashReason reason, bool slashed)
+    {
+        uint48 canceledAt = IBondGovernor(governor).proposalCanceledAt(proposalId);
+        if (canceledAt == 0) return (treasury, SlashReason.TimelockVeto, true);
+        if (canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) {
+            return (proposer, SlashReason.None, false);
+        }
+        return (treasury, SlashReason.ActiveSelfCancel, true);
     }
 
     /// @dev Slash predicate: rejections beat approvals AND, with the proposer's own standing
