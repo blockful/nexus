@@ -32,7 +32,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     using SafeERC20 for IERC20;
 
     /// @dev Bravo ordering plus the slash option: 0=Against, 1=For, 2=Abstain,
-    ///      3=AgainstAndSlash. Values 0–2 are wire-compatible with StandardRuleset.
+    ///      3=AgainstAndSlash.
     enum VoteType {
         Against,
         For,
