@@ -197,14 +197,14 @@ Design consequences, accepted deliberately:
   (new types, moved default) cannot retroactively change any live proposal's cancel
   exposure, and a malicious ruleset has no say in cancel authorization.
 
-## Bond ruleset (Nexus 8)
+## Bond ruleset
 
 `BondRuleset` is a lock-to-propose proposal type: it registers with `proposalThreshold =
 0`, so anyone can propose through it by locking `bondAmount` of ENS — no voting-power gate
 at all. Counting adds a fourth ballot option to the Bravo triple, `AgainstAndSlash`, cast
 through the same vote as any other option (no separate challenge game). The bond is
-forfeited to the DAO treasury exactly when the vote deems the proposal spam, per the
-predicate the DAO ratified on Snapshot (EP 5.15):
+forfeited to the DAO treasury exactly when the vote judges the proposal to be spam, per the
+predicate the DAO ratified on Snapshot:
 
 ```
 slashed ⟺ (Against + AgainstAndSlash > For) ∧ (AgainstAndSlash′ > Against′)
@@ -213,19 +213,19 @@ slashed ⟺ (Against + AgainstAndSlash > For) ∧ (AgainstAndSlash′ > Against�
 where `′` excludes the proposer's own standing vote from the second comparison only — the
 first (defeat) comparison stays the raw buckets. Without the exclusion, a proposer could
 cast a plain `Against` vote on their own proposal to dilute the slash bucket's plurality
-and dodge forfeiture while still losing the vote (F3); excluding their receipt from that
+and dodge forfeiture while still losing the vote (the anti-dilution rule); excluding their receipt from that
 one comparison closes it without touching the DAO-ratified rule itself. A `Defeated`
 outcome driven by quorum failure, or a tie (`For == rejections`), never slashes — only a
 clear rejection with slash-plurality does.
 
-Cancellation interacts with the bond through the same partition N5 already draws between
-`Pending` and `Active`:
+Cancellation interacts with the bond through the same partition the cancellation policy
+draws between `Pending` and `Active`:
 
 | Path | Outcome |
 |---|---|
 | Self-cancel while `Pending` | Full refund — no vote existed yet, nothing to evade |
 | Self-cancel while `Active` | Full forfeit — once voting is live, exiting costs as much as losing it |
-| Canceled directly on the timelock (security-council veto) | Full forfeit — EP 5.15's stated default |
+| Canceled directly on the timelock (security-council veto) | Full forfeit — the ratified default |
 
 `resolveBond` is permissionless and one-shot, and only ever pays out in a terminal state —
 `Executed`, `Defeated`, or `Canceled`. It reverts in `Succeeded`/`Queued`: those states sit
@@ -234,8 +234,8 @@ proposer pull their bond out from under a veto before the council acts. A refund
 passed proposal is available the moment it executes, and execution is permissionless.
 
 Every BondRuleset parameter — `token`, `quorumNumerator`, `bondAmount`, `treasury` — is
-`immutable`, with no setters (D59), matching every other ruleset in this repo. 1,000 ENS is
-EP 5.15's recorded initial value ("1,000 ENS is the right initial value"). The DAO
+`immutable`, with no setters, matching every other ruleset in this repo. 1,000 ENS is
+the ratified initial value ("1,000 ENS is the right initial value"). The DAO
 re-prices the bond, or moves the treasury, by deploying a new `BondRuleset` and calling
 `registerType` — never by adding a setter to this one; proposals already locked against the
 old ruleset keep resolving against it.
@@ -244,8 +244,8 @@ Accepted residuals:
 
 - **Whale force-slash.** A large holder can vote `AgainstAndSlash` on an honestly-defeated
   proposal and confiscate the bond at zero marginal cost of their own; the predicate's
-  defeat-plus-plurality bar bounds this but doesn't eliminate it. This is EP 5.15's own
-  mandate, not an implementation gap — Cosmos's ATOM 2.0 governance-spam deposit is the
+  defeat-plus-plurality bar bounds this but doesn't eliminate it. This is the ratified
+  mandate itself, not an implementation gap — Cosmos's ATOM 2.0 governance-spam deposit is the
   real-world precedent for the same trade-off.
 - **Sybil vs. the bond.** Splitting proposals across multiple identities doesn't reduce
   total cost the way it can against a voting-power threshold: each identity still locks a
@@ -275,7 +275,7 @@ Accepted residuals:
 | `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
 | `src/IProposalValidator.sol` | Optional ruleset extension — propose-time content-validation hook (carries `descriptionHash`), ERC165-detected at registration; drives the optimistic gate and `BondRuleset`'s bond lock |
 | `src/OptimisticRuleset.sol` | Optimistic ruleset — pass-unless-vetoed outcome + propose-time proposer/action allowlists |
-| `src/BondRuleset.sol` | **Lock-to-propose ruleset (Nexus 8)** — fourth ballot option, bond custody (lock/refund/forfeit), EP 5.15 slash predicate |
+| `src/BondRuleset.sol` | **Lock-to-propose ruleset** — fourth ballot option, bond custody (lock/refund/forfeit), spam-slash predicate |
 | `src/ENSGovernor.sol` | Stock OZ v5.6.1 baseline composition, zero custom logic — kept for reference and parity testing |
 | `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
 | `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
@@ -328,4 +328,4 @@ describe each mechanism without that vocabulary. The decoder:
 | Nexus 5 | Cancellation — proposer self-cancel + continuous-threshold permissionless cancel |
 | Nexus 6 | Batch voting — `castVoteWithReasonAndParamsBatch` |
 | Nexus 7 | Optimistic ruleset — pass-unless-vetoed + the propose-time validation gate ([spec](docs/specs/2026-07-22-nexus7-optimistic-ruleset.md)) |
-| Nexus 8 | Bond ruleset — lock-to-propose, EP 5.15 slash predicate, cancel-partition custody |
+| Nexus 8 | Bond ruleset — lock-to-propose, spam-slash predicate, cancel-partition custody |

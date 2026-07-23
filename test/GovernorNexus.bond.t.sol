@@ -8,9 +8,10 @@ import {BondRuleset} from "../src/BondRuleset.sol";
 import {BondRulesetTestBase} from "./BondRulesetTestBase.sol";
 
 /// @dev Integration suite for `resolveBond` against the real `GovernorNexus` + timelock —
-///      the EP 5.15 predicate (D56), the terminal-states-only guard (D61), and the
-///      proposer-exclusion carve-out (F3), each exercised end to end through the actual
-///      propose → vote → queue/execute/cancel lifecycle rather than a mocked governor.
+///      the spam-slash predicate (a defeated proposal forfeits its bond when the vote judges it
+///      spam), the terminal-states-only guard, and the proposer-exclusion carve-out, each
+///      exercised end to end through the actual propose → vote → queue/execute/cancel lifecycle
+///      rather than a mocked governor.
 contract GovernorNexusBondTest is BondRulesetTestBase {
     function test_endToEnd_permissionlessPropose_zeroVP() public {
         (uint256 id,,,,) = _proposeBonded("bonded");
@@ -86,9 +87,9 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
     }
 
     /// @dev Corrected from the brief's original draft ("quorumFailOnly_refunds"): with only
-    ///      `AgainstAndSlash 100k` cast (For 0, Against 0), BOTH D56 clauses hold — rejections
+    ///      `AgainstAndSlash 100k` cast (For 0, Against 0), BOTH slash clauses hold — rejections
     ///      100k > For 0, and Slash 100k > Against 0 — so this genuinely forfeits. The quorum-
-    ///      fail carve-out in D56 is about approvals ≥ rejections, which is not this shape.
+    ///      fail carve-out is about approvals ≥ rejections, which is not this shape.
     function test_resolve_defeated_quorumFailOnly_slashLeads_forfeits() public {
         address slasher = makeAddr("slasher");
         _fund(slasher, 100_000e18);
@@ -124,7 +125,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT); // clause 1 false → refund
     }
 
-    // ─────────────────────── Proposer-exclusion tests (F3) ───────────────────────
+    // ─────────────────────── Proposer-exclusion tests ───────────────────────
 
     function test_resolve_proposerPlainNoDilution_excluded_slashes() public {
         // Community: Slash 200k. Proposer dumps plain-No 300k to force No > Slash.
@@ -140,7 +141,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         vm.prank(slasher);
         governor.castVote(id, uint8(BondRuleset.VoteType.AgainstAndSlash));
         vm.prank(bob);
-        governor.castVote(id, uint8(BondRuleset.VoteType.Against)); // the F3 move
+        governor.castVote(id, uint8(BondRuleset.VoteType.Against)); // the proposer-exclusion move
         vm.roll(governor.proposalDeadline(id) + 1);
 
         uint256 before = token.balanceOf(address(timelock));
@@ -219,7 +220,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         bondRuleset.resolveBond(123);
     }
 
-    // ─────────────────────── Cancel-partition tests (F1, D57, D58) ───────────────────────
+    // ─────────────────────── Cancel-partition tests ───────────────────────
 
     function test_cancel_pending_refunds() public {
         address[] memory t;
@@ -282,7 +283,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
     }
 
     function test_thirdPartyCancel_impossible_zeroThresholdLine() public {
-        // D60: bond line has proposalThreshold = 0 → permissionless-cancel clause never fires.
+        // bond line has proposalThreshold = 0 → permissionless-cancel clause never fires.
         address[] memory t;
         uint256[] memory v;
         bytes[] memory c;
@@ -298,7 +299,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
 
     // ─────────────────── Cross-mechanism interaction tests ───────────────────
 
-    /// @dev Batch voting (N6) against bond proposals (N2): one call casts AgainstAndSlash on
+    /// @dev Batch voting against bond proposals: one call casts AgainstAndSlash on
     ///      one proposal and For on another — each bucket lands on its own proposal only.
     function test_interaction_batchVote_supportThree() public {
         address slasher = makeAddr("slasher");
@@ -326,7 +327,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(for2, 200_000e18);
     }
 
-    /// @dev Mutable re-vote (N3/RulesetCounting semantics) against a bond proposal (N2): a
+    /// @dev Mutable re-vote (RulesetCounting semantics) against a bond proposal: a
     ///      voter that flips from AgainstAndSlash to For fully drains the slash bucket —
     ///      the old vote does not linger as residue.
     function test_interaction_revote_drainsSlashBucket() public {
@@ -343,15 +344,16 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(slash, 0);
     }
 
-    /// @dev Late-flip anti-snipe extension (N3) against a bond proposal (N2), proving the
-    ///      mechanism is type-agnostic (D36). Mirrors the proven trigger from
+    /// @dev Late-flip anti-snipe extension against a bond proposal, proving the
+    ///      mechanism is type-agnostic (the late-flip extension applies to every proposal type).
+    ///      Mirrors the proven trigger from
     ///      `GovernorNexus.lateFlip.t.sol`: the pre-count observation inside the final
     ///      `extensionWindow` sees the still-failing tally (alice's earlier Against, not yet
     ///      overtaken by the flipper's own vote) and arms `FailingObserved`; the assertion
     ///      is read only after rolling past the original deadline, since the deadline view
     ///      promises nothing pre-deadline (`test_deadlineViewUnchangedBeforeOriginalDeadline`).
     function test_interaction_lateFlip_extendsBondProposal() public {
-        // failing → passing inside the window must extend (N3 is type-agnostic, D36)
+        // failing → passing inside the window must extend (the late-flip extension applies to every proposal type)
         address flipper = makeAddr("flipper");
         _fund(flipper, 2_500_000e18); // outweighs alice
         vm.roll(block.number + 1);

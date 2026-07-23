@@ -8,9 +8,9 @@ import {BondRuleset} from "../src/BondRuleset.sol";
 import {IRuleset} from "../src/IRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
-/// @dev Extends the shared fixture with a registered bond type (proposalThreshold = 0 per
-///      D60), a fund-but-no-VP proposer, and a council address holding the timelock's
-///      CANCELLER_ROLE to simulate the security-council veto.
+/// @dev Extends the shared fixture with a registered bond type (proposalThreshold = 0, making
+///      proposing permissionless), a fund-but-no-VP proposer, and a council address holding the
+///      timelock's CANCELLER_ROLE to simulate the security-council veto.
 abstract contract BondRulesetTestBase is GovernorNexusTestBase {
     uint256 internal constant BOND_AMOUNT = 1_000e18;
 

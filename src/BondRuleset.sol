@@ -20,11 +20,11 @@ interface IBondGovernor {
 }
 
 /// @title BondRuleset
-/// @notice Lock-to-propose ruleset (Nexus 8): anyone proposes without the voting-power
+/// @notice Lock-to-propose ruleset: anyone proposes without the voting-power
 ///         threshold by locking `bondAmount` of ENS, forfeited to the DAO treasury iff the
-///         vote deems the proposal spam (EP 5.15 predicate) or the proposal is canceled
+///         vote deems the proposal spam, or the proposal is canceled
 ///         after voting opened / vetoed from the timelock.
-/// @dev Immutable by design (D7/D59): no setters. Custody invariant: the ruleset's token
+/// @dev Immutable by design: no setters. Custody invariant: the ruleset's token
 ///      balance always covers every unsettled bond. Resolution is permissionless and
 ///      one-shot; refunds release only in terminal states (`Executed`/`Defeated`/`Canceled`)
 ///      so the security council's veto window is never front-run.
@@ -114,7 +114,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         );
     }
 
-    /// @dev The three Bravo options plus AgainstAndSlash (D63).
+    /// @dev The three Bravo options plus AgainstAndSlash.
     function _isValidSupport(uint8 support) internal pure override returns (bool) {
         return support <= uint8(VoteType.AgainstAndSlash);
     }
@@ -138,7 +138,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
     /// @inheritdoc IRuleset
     /// @dev For + Abstain only — AgainstAndSlash is an Against variant and, like Against,
-    ///      never counts toward quorum. Non-monotonic under re-votes (D16).
+    ///      never counts toward quorum. Non-monotonic under re-votes.
     function quorumReached(uint256 proposalId) external view returns (bool) {
         uint256 forVotes = tally(proposalId, uint8(VoteType.For));
         uint256 abstainVotes = tally(proposalId, uint8(VoteType.Abstain));
@@ -147,8 +147,8 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     }
 
     /// @inheritdoc IRuleset
-    /// @dev Rejections are the sum of both Against buckets (EP 5.15: "the sum of rejections").
-    ///      Non-monotonic under re-votes (D16).
+    /// @dev Rejections are the sum of both Against buckets — plain Against plus AgainstAndSlash.
+    ///      Non-monotonic under re-votes.
     function voteSucceeded(uint256 proposalId) external view returns (bool) {
         uint256 rejections =
             tally(proposalId, uint8(VoteType.Against)) + tally(proposalId, uint8(VoteType.AgainstAndSlash));
@@ -173,8 +173,16 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
         IERC20 erc20 = IERC20(address(token));
         uint256 balanceBefore = erc20.balanceOf(address(this));
+        // `from` is the governed proposer — the hook is onlyGovernor and the governor passes
+        // the propose caller, so it is never an attacker-chosen victim; the analyzers cannot
+        // see that invariant.
+        // slither-disable-start arbitrary-send-erc20
+        // aderyn-ignore-next-line(arbitrary-transfer-from)
         erc20.safeTransferFrom(proposer, address(this), bondAmount);
+        // slither-disable-end
         uint256 received = erc20.balanceOf(address(this)) - balanceBefore;
+        // Zero-received guard on a measured delta; strict equality is exact for an unsigned amount.
+        // slither-disable-next-line incorrect-equality
         if (received == 0) revert ZeroBondReceived();
 
         // received ≤ bondAmount ≤ uint96.max (constructor bound) — cast is safe.
@@ -217,8 +225,8 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         }
     }
 
-    /// @dev EP 5.15 predicate (D56): rejections beat approvals AND, with the proposer's own
-    ///      standing vote removed from both opposition buckets, slash-weight beats plain-No.
+    /// @dev Slash predicate: rejections beat approvals AND, with the proposer's own standing
+    ///      vote removed from both opposition buckets, slash-weight beats plain-No.
     function _slashVoted(uint256 proposalId, address proposer) private view returns (bool) {
         uint256 forVotes = tally(proposalId, uint8(VoteType.For));
         uint256 againstVotes = tally(proposalId, uint8(VoteType.Against));
