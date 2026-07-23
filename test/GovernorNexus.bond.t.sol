@@ -86,10 +86,6 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
     }
 
-    /// @dev Corrected from the brief's original draft ("quorumFailOnly_refunds"): with only
-    ///      `AgainstAndSlash 100k` cast (For 0, Against 0), BOTH slash clauses hold — rejections
-    ///      100k > For 0, and Slash 100k > Against 0 — so this genuinely forfeits. The quorum-
-    ///      fail carve-out is about approvals ≥ rejections, which is not this shape.
     function test_resolve_defeated_quorumFailOnly_slashLeads_forfeits() public {
         address slasher = makeAddr("slasher");
         _fund(slasher, 100_000e18);
