@@ -12,8 +12,7 @@ interface IProposalValidator {
     /// @param targets Call targets, one per action.
     /// @param values ETH values, one per action.
     /// @param calldatas Encoded calls, one per action.
-    /// @param descriptionHash Hash of the proposal description; lets a validator derive the
-    ///        canonical proposal id `keccak256(abi.encode(targets, values, calldatas, descriptionHash))`.
+    /// @param descriptionHash Hash of the proposal description.
     function validateProposal(
         address proposer,
         address[] calldata targets,
