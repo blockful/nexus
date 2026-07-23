@@ -245,8 +245,7 @@ Accepted residuals:
 - **Whale force-slash.** A large holder can vote `AgainstAndSlash` on an honestly-defeated
   proposal and confiscate the bond at zero marginal cost of their own; the predicate's
   defeat-plus-plurality bar bounds this but doesn't eliminate it. This is the ratified
-  mandate itself, not an implementation gap — Cosmos's ATOM 2.0 governance-spam deposit is the
-  real-world precedent for the same trade-off.
+  mandate itself, not an implementation gap.
 - **Sybil vs. the bond.** Splitting proposals across multiple identities doesn't reduce
   total cost the way it can against a voting-power threshold: each identity still locks a
   full `bondAmount`, so the bond scales spam cost linearly with proposal count regardless
