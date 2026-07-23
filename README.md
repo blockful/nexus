@@ -251,6 +251,18 @@ Accepted residuals:
   total cost the way it can against a voting-power threshold: each identity still locks a
   full `bondAmount`, so the bond scales spam cost linearly with proposal count regardless
   of how it's split across addresses.
+- **Gated-ruleset trust.** A ruleset that implements the propose-time hook is fully trusted
+  by governance — registering it is a governance action, and it already controls its type's
+  counting, quorum, and success. Its hook is the first external call in the governor's
+  propose path, so a *malicious* gated ruleset could reenter and exceed its own
+  per-proposer active-proposal cap (never a victim's — the reentrant proposer is the ruleset
+  itself). No reentrancy guard is added: the production `BondRuleset` transfers hook-free
+  ENS, and the exposure is bounded to a self-inflicted cap on a governance-approved contract.
+- **Bond stranded by an unexecutable-but-approved proposal.** A proposal that passes but
+  whose on-chain actions always revert on execution never reaches `Executed` (the timelock
+  has no `Expired` state), so it stays in `Queued` and its bond is never released. Accepted:
+  it requires the community to approve a proposal with permanently-reverting calldata, and
+  the stranded bond is the proposer's own.
 
 ## Layout
 
