@@ -48,8 +48,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     mapping(uint256 proposalId => uint8) private _proposalType;
 
     /// @dev Timepoint of the governor-path cancel, 0 if never canceled through the governor.
-    ///      A proposal in `Canceled` state with a zero entry was canceled directly on the
-    ///      timelock (security-council veto) — BondRuleset keys its forfeit partition on this.
     mapping(uint256 proposalId => uint48) private _canceledAt;
 
     /// @dev Ids of the proposer's tracked proposals, lazily pruned on their next propose.
