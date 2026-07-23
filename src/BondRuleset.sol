@@ -168,21 +168,13 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
 
         IERC20 erc20 = IERC20(address(token));
-        // Measured-delta custody records the bond only after the transfer settles, so state
-        // necessarily changes after these balance reads. Safe: the ENS token is transfer-hook-free
-        // and the duplicate-lock guard above bars re-entrant re-locking of the same id.
-        // aderyn-ignore-next-line(reentrancy-state-change)
+    
         uint256 balanceBefore = erc20.balanceOf(address(this));
-        // `from` is the governed proposer — the hook is onlyGovernor and the governor passes the
-        // propose caller, so it is never an attacker-chosen victim.
-        // slither-disable-start arbitrary-send-erc20
-        // aderyn-ignore-next-line(reentrancy-state-change)
+
         erc20.safeTransferFrom(proposer, address(this), bondAmount);
-        // slither-disable-end
-        // aderyn-ignore-next-line(reentrancy-state-change)
+
         uint256 received = erc20.balanceOf(address(this)) - balanceBefore;
-        // Zero-received guard on a measured delta; strict equality is exact for an unsigned amount.
-        // slither-disable-next-line incorrect-equality
+
         if (received == 0) revert ZeroBondReceived();
 
         // received ≤ bondAmount ≤ uint96.max (constructor bound) — cast is safe.
