@@ -33,10 +33,6 @@ abstract contract BondRulesetTestBase is GovernorNexusTestBase {
 
         token.mint(bob, 10 * BOND_AMOUNT); // deliberately NOT delegated — zero voting power
 
-        // Hoisted out of the pranked call: `grantRole(timelock.CANCELLER_ROLE(), council)` would
-        // evaluate the `CANCELLER_ROLE()` view call first, consuming the single-shot `vm.prank`
-        // before `grantRole` itself runs — leaving `grantRole` to execute as the un-pranked test
-        // contract, which lacks `DEFAULT_ADMIN_ROLE` after the base fixture's renounce.
         bytes32 cancellerRole = timelock.CANCELLER_ROLE();
         vm.prank(address(timelock));
         timelock.grantRole(cancellerRole, council);
