@@ -156,11 +156,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     }
 
     /// @inheritdoc IProposalValidator
-    /// @dev Pulls the bond and records it under the canonical proposalId (same derivation as
-    ///      OZ `hashProposal`). Recorded amount is the measured balance delta, so a
-    ///      non-standard token can never under-collateralize the pool. A duplicate id cannot
-    ///      double-lock: the guard reverts here, and even without it the governor's stock
-    ///      duplicate check reverts the same transaction, unwinding this transfer.
+    /// @dev Pulls the bond and records it under the canonical proposalId.
     function validateProposal(
         address proposer,
         address[] calldata targets,
