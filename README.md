@@ -202,7 +202,7 @@ Design consequences, accepted deliberately:
 `BondRuleset` is a lock-to-propose proposal type: it registers with `proposalThreshold =
 0`, so anyone can propose through it by locking `bondAmount` of ENS — no voting-power gate
 at all. Counting adds a fourth ballot option to the Bravo triple, `AgainstAndSlash`, cast
-through the same vote as any other option (no separate challenge game). The bond is
+through the same vote as any other option. The bond is
 forfeited to the DAO treasury exactly when the vote judges the proposal to be spam, per the
 predicate the DAO ratified on Snapshot:
 
