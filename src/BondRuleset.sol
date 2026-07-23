@@ -166,15 +166,10 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     ) external onlyGovernor {
         uint256 proposalId = uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
-
         IERC20 erc20 = IERC20(address(token));
-    
         uint256 balanceBefore = erc20.balanceOf(address(this));
-
         erc20.safeTransferFrom(proposer, address(this), bondAmount);
-
         uint256 received = erc20.balanceOf(address(this)) - balanceBefore;
-
         if (received == 0) revert ZeroBondReceived();
 
         // received ≤ bondAmount ≤ uint96.max (constructor bound) — cast is safe.
