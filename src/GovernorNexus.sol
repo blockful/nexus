@@ -10,7 +10,8 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
-import {IRuleset} from "./IRuleset.sol";
+import {IProposalValidator} from "./interfaces/IProposalValidator.sol";
+import {IRuleset} from "./interfaces/IRuleset.sol";
 
 /// @title GovernorNexus
 /// @notice Modular ENS governor core. Replaces OZ's baked-in settings/counting/quorum
@@ -21,15 +22,17 @@ import {IRuleset} from "./IRuleset.sol";
 ///      counting is dispatched to rulesets. The type table is append-only and
 ///      content-immutable: only `active` toggles and the default pointer move.
 contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
-    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod` and
-    ///         `proposalThreshold` are set once at registration and never mutated;
-    ///         `active` is the only mutable field and gates NEW proposals only.
+    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
+    ///         `hasProposalValidation` and `proposalThreshold` are set once at registration and
+    ///         never mutated; `active` is the only mutable field and gates NEW proposals
+    ///         only.
     struct TypeConfig {
         IRuleset ruleset;
         uint48 votingDelay;
         uint32 votingPeriod;
-        uint256 proposalThreshold;
         bool active;
+        bool hasProposalValidation;
+        uint256 proposalThreshold;
     }
 
     mapping(uint8 => TypeConfig) private _types;
@@ -43,6 +46,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
+
+    /// @dev Timepoint of the governor-path cancel, 0 if never canceled through the governor.
+    mapping(uint256 proposalId => uint48) private _canceledAt;
 
     /// @dev Ids of the proposer's tracked proposals, lazily pruned on their next propose.
     ///      An id is pushed only after {_pruneAndCheckActiveLimit} passes, so length is
@@ -113,7 +119,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @param votingDelay_ Bootstrap type voting delay.
     /// @param votingPeriod_ Bootstrap type voting period; must be non-zero.
     /// @param proposalThreshold_ Bootstrap type proposal threshold.
-    /// @param maxActiveProposals_ Per-proposer live-proposal cap (RFC deploy value: 2);
+    /// @param maxActiveProposals_ Per-proposer live-proposal cap;
     ///        `1..MAX_ACTIVE_PROPOSALS_CEILING`, enforced by the same guard as the setter.
     /// @param extensionWindow_ Late-flip trigger window (see `GovernorPreventLateFlip`).
     /// @param extensionDuration_ Late-flip extension length (see `GovernorPreventLateFlip`).
@@ -215,8 +221,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
             ruleset: ruleset,
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
-            proposalThreshold: proposalThreshold_,
-            active: true
+            active: true,
+            hasProposalValidation: ERC165Checker.supportsInterface(
+                address(ruleset), type(IProposalValidator).interfaceId
+            ),
+            proposalThreshold: proposalThreshold_
         });
         emit TypeRegistered(id, ruleset, votingDelay_, votingPeriod_, proposalThreshold_);
     }
@@ -242,6 +251,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @dev Inherits the existence check of `proposalType`.
     function proposalRuleset(uint256 proposalId) external view returns (IRuleset) {
         return _types[proposalType(proposalId)].ruleset;
+    }
+
+    /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
+        return _canceledAt[proposalId];
     }
 
     // ─────────────────────────── Propose paths ───────────────────────────
@@ -315,6 +329,12 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         // creation door — present or future — can miss either half.
         _pruneAndCheckActiveLimit(proposer);
 
+        TypeConfig storage config = _types[typeId];
+        if (config.hasProposalValidation) {
+            IProposalValidator(address(config.ruleset))
+                .validateProposal(proposer, targets, values, calldatas, keccak256(bytes(description)));
+        }
+
         _typeContext = uint16(typeId) + 1;
         proposalId = super._propose(targets, values, calldatas, description, proposer);
         _typeContext = 0;
@@ -328,7 +348,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     /// @dev Drops every tracked id that left the live set, then enforces the cap. The live
     ///      set is a positive whitelist — `Pending` or `Active`, nothing else — so new
-    ///      lifecycle states fail closed; revisit if the lifecycle ever grows new states.
+    ///      lifecycle states fail closed.
     function _pruneAndCheckActiveLimit(address proposer) private {
         uint256[] storage ids = _activeProposals[proposer];
         uint256 length = ids.length;
@@ -525,8 +545,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     /// @dev All-or-nothing: any failing item reverts the whole batch. Duplicate ids are
     ///      valid intra-tx re-votes, last-wins. Empty `reasons[i]`/`params[i]` entries mean
     ///      "none". Explicit function rather than `Multicall`: the governor's payable
-    ///      surface makes Multicall the msg.value-reuse bug class — if a trusted forwarder
-    ///      is ever added, revisit this entry point.
+    ///      surface makes Multicall the msg.value-reuse bug class.
     function castVoteWithReasonAndParamsBatch(
         uint256[] calldata proposalIds,
         uint8[] calldata supportValues,
@@ -618,7 +637,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         bytes[] memory calldatas,
         bytes32 descriptionHash
     ) internal virtual override(Governor, GovernorTimelockControl) returns (uint256) {
-        return super._cancel(targets, values, calldatas, descriptionHash);
+        uint256 proposalId = super._cancel(targets, values, calldatas, descriptionHash);
+        _canceledAt[proposalId] = clock();
+        return proposalId;
     }
 
     function _executor() internal view virtual override(Governor, GovernorTimelockControl) returns (address) {

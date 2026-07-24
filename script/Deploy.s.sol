@@ -7,7 +7,7 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {StandardRuleset} from "../src/rulesets/StandardRuleset.sol";
 import {ENSParams} from "../src/ENSParams.sol";
 
 /// @notice Deploys the Nexus system — `StandardRuleset` + `GovernorNexus` — wired to the
@@ -15,7 +15,7 @@ import {ENSParams} from "../src/ENSParams.sol";
 ///         contract is granted timelock roles here; migration onto the live timelock is a
 ///         DAO proposal granting PROPOSER + EXECUTOR (the live timelock is OZ v4.3:
 ///         CANCELLER_ROLE does not exist there).
-/// @dev Wiring (spec §Wiring note): `StandardRuleset.countVote` is `onlyGovernor` and
+/// @dev Wiring: `StandardRuleset.countVote` is `onlyGovernor` and
 ///      `quorumReached` reads `governor.proposalSnapshot`, so the ruleset must be
 ///      constructed with the governor's address — but the governor's constructor needs the
 ///      ruleset (it registers row 0 with it). Break the cycle by precomputing the
@@ -46,7 +46,7 @@ contract Deploy is Script {
         standardRuleset = new StandardRuleset(predictedGovernor, IVotes(ENSParams.TOKEN), ENSParams.QUORUM_NUMERATOR);
 
         // Name "ENS Governor" so `name()` and the EIP-712 vote-by-sig domain match the live
-        // governor (spec D11).
+        // governor.
         governor = new GovernorNexus(
             "ENS Governor",
             IVotes(ENSParams.TOKEN),
