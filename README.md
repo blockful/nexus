@@ -316,11 +316,11 @@ Fork tests pin block 25,445,220 and default to a public archive RPC; set
 governor (real deployed bytecode, real token checkpoint history) vs GovernorNexus, both
 running identical payloads through the same helpers. Gas is the `gasleft()` delta around
 the single measured call, excluding setup/fixture cost. Reference numbers at block
-25,445,220:
+25,445,220 (regenerate with `forge test --match-contract GasBench -vv`):
 
 | op | live gov | GovernorNexus | delta | attribution |
 |---|---:|---:|---:|---|
-| propose | 115,052 | 102,838 | -12,214 | Net cheaper despite the type-pin SSTORE, transient-context writes, and the extra `ProposalTypedCreated` event — OZ v5's packed `ProposalCore` beats the live governor's own storage layout by more than those add. |
-| castVote | 106,982 | 109,969 | +2,987 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE) — matches the expected ~+2.9k. |
-| queue | 102,244 | 117,983 | +15,739 | `queue()`'s state-bitmap check re-derives quorum/success by calling out to the ruleset, which itself calls back into the governor (`proposalSnapshot`) and out to the token (`getPastTotalSupply`) — a multi-hop CALL chain the live governor's local tally doesn't pay. |
-| execute | 79,188 | 59,747 | -19,441 | Net cheaper; `execute()`'s state check re-runs the same ruleset CALL chain as `queue()`, so the sign flip is attributed to the live governor's own (opaque, bytecode-only) execute-path bookkeeping rather than anything ruleset-side. |
+| propose | 115,052 | 139,441 | +24,389 | Type-pin SSTORE + transient-context writes + the extra `ProposalTypedCreated` event, plus the spam-limit bookkeeping (active-set append + lazy prune) and the propose-time validation hook — partially offset by OZ v5's packed `ProposalCore` beating the live governor's storage layout. |
+| castVote | 106,982 | 135,831 | +28,849 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE), the anti-snipe low-water evaluation around the cast (outcome views call back into the governor and out to the token), and the vote-nonce spend on direct casts. |
+| queue | 102,244 | 121,931 | +19,687 | `queue()`'s state-bitmap check re-derives quorum/success by calling out to the ruleset, which itself calls back into the governor (`proposalSnapshot`) and out to the token (`getPastTotalSupply`) — a multi-hop CALL chain the live governor's local tally doesn't pay. |
+| execute | 79,188 | 61,606 | -17,582 | Net cheaper; `execute()`'s state check re-runs the same ruleset CALL chain as `queue()`, so the sign flip is attributed to the live governor's own (opaque, bytecode-only) execute-path bookkeeping rather than anything ruleset-side. |
