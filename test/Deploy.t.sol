@@ -5,18 +5,16 @@ import {Test} from "forge-std/Test.sol";
 
 import {Deploy} from "../script/Deploy.s.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {StandardRuleset} from "../src/rulesets/StandardRuleset.sol";
 import {ENSParams} from "../src/ENSParams.sol";
 
 /// @dev Exercises `Deploy.run()` exactly as `forge script` would invoke it: no fork, no
-///      mocked token/timelock. The token-constructor investigation (see task report) found
-///      that neither `GovernorVotes` nor `GovernorTimelockControl`'s constructors make any
-///      external call on the addresses they're given — both only store them (see
-///      `lib/openzeppelin-contracts/contracts/governance/extensions/GovernorVotes.sol:18-20`
-///      and `.../GovernorTimelockControl.sol:36-38,153-156`) — so `ENSParams.TOKEN` and
-///      `ENSParams.TIMELOCK` can safely be no-code addresses here. The only constructor path
-///      that reaches out during deploy is `GovernorNexus`'s ERC165 `staticcall` on the
-///      ruleset, which is real, locally-deployed code. A fork is therefore unnecessary.
+///      mocked token/timelock. Neither `GovernorVotes` nor `GovernorTimelockControl`'s
+///      constructors make any external call on the addresses they're given — both only
+///      store them — so `ENSParams.TOKEN` and `ENSParams.TIMELOCK` can safely be no-code
+///      addresses here. The only constructor path that reaches out during deploy is
+///      `GovernorNexus`'s ERC165 `staticcall` on the ruleset, which is real,
+///      locally-deployed code. A fork is therefore unnecessary.
 contract DeployTest is Test {
     Deploy internal deployScript;
 
@@ -27,7 +25,7 @@ contract DeployTest is Test {
     function test_run_wiresStandardRulesetAndGovernorNexus() public {
         (StandardRuleset standardRuleset, GovernorNexus governor) = deployScript.run();
 
-        // D11: name parity with the live governor's EIP-712 domain.
+        // Name parity with the live governor's EIP-712 domain.
         assertEq(governor.name(), "ENS Governor");
 
         // Ruleset <-> governor wiring (cycle broken via the precompute).

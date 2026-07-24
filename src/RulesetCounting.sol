@@ -1,29 +1,29 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IRuleset} from "./IRuleset.sol";
+import {IRuleset} from "./interfaces/IRuleset.sol";
 
 /// @title RulesetCounting
 /// @notice Shared vote-counting mechanics for every GovernorNexus ruleset: support buckets,
 ///         per-voter receipts, and **mutable votes** — re-voting while the poll is open replaces
-///         the voter's standing vote instead of reverting (Nexus 2, D12).
+///         the voter's standing vote instead of reverting.
 /// @dev Rules (which support values exist, quorum, success, counting mode) belong to the
 ///      inheriting ruleset; this base owns only the arithmetic and the `onlyGovernor` trust
 ///      boundary. Buckets are keyed by the raw `support` value rather than a fixed
-///      Against/For/Abstain struct, so a ruleset with extra options — Bond's No+Slash (Nexus 8) —
-///      reuses this counting layer without a storage-layout change (D13). Which values are legal
+///      Against/For/Abstain struct, so a ruleset with extra options — Bond's No+Slash —
+///      reuses this counting layer without a storage-layout change. Which values are legal
 ///      is the ruleset's call, via `_isValidSupport`.
 ///
-///      **Non-monotonicity — read this before building on the tallies (D16).** Because a re-vote
+///      **Non-monotonicity — read this before building on the tallies.** Because a re-vote
 ///      debits the voter's previous bucket, tallies can *fall* as well as rise while voting is
 ///      open. Any quantity derived from them (quorum reached, vote succeeded) may therefore flip
 ///      in both directions until the deadline. No consumer may arm one-shot state on a
 ///      tally-crossing event — an attacker can cross a threshold early, re-vote back below it,
-///      and so burn a once-only trigger before the crossing that actually matters (finding F2).
+///      and so burn a once-only trigger before the crossing that actually matters.
 ///      Mechanisms needing finality must evaluate the outcome at (or near) the deadline, bar
 ///      re-votes inside their own window, or gate early finality entirely.
 ///
-///      Voting-window enforcement stays in the core (D17): the governor only calls `countVote`
+///      Voting-window enforcement stays in the core: the governor only calls `countVote`
 ///      while the proposal is Active, and supplies the weight from the frozen snapshot — this
 ///      base never reads the clock and never sources weight of its own.
 abstract contract RulesetCounting is IRuleset {
@@ -71,7 +71,7 @@ abstract contract RulesetCounting is IRuleset {
     ///      can ever see the voter's weight double-counted or missing. Re-voting the same support
     ///      is the degenerate case (debit and credit cancel out) and is allowed — no special path.
     /// @return The weight now standing for `voter` on this proposal (what the core reports in
-    ///         `VoteCast`; the latest such event per (proposal, voter) is canonical — D15).
+    ///         `VoteCast`; the latest such event per (proposal, voter) is canonical).
     function countVote(
         uint256 proposalId,
         address voter,
@@ -101,7 +101,7 @@ abstract contract RulesetCounting is IRuleset {
     /// @notice Whether `voter` has a standing vote on `proposalId`.
     /// @dev Stays `true` across re-votes — it answers "does this voter have a vote", not "how
     ///      many times did they cast". Never reverts on an id this ruleset never counted
-    ///      (empty-receipt default, `false`), per the interface contract pinned in Nexus 1.
+    ///      (empty-receipt default, `false`), per the `IRuleset` interface contract.
     function hasVoted(uint256 proposalId, address voter) public view returns (bool) {
         return _receipts[proposalId][voter].hasVoted;
     }

@@ -4,8 +4,8 @@ pragma solidity 0.8.30;
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {IRuleset} from "./IRuleset.sol";
-import {RulesetCounting} from "./RulesetCounting.sol";
+import {IRuleset} from "../interfaces/IRuleset.sol";
+import {RulesetCounting} from "../RulesetCounting.sol";
 
 /// @dev Minimal governor surface StandardRuleset consumes — only `proposalSnapshot`, so a
 ///      registry or test can satisfy this with a trivial stand-in instead of a full governor.
@@ -16,15 +16,14 @@ interface IRulesetGovernor {
 /// @title StandardRuleset
 /// @notice The ENS governor's counting rules (OZ `GovernorCountingSimple` +
 ///         `GovernorVotesQuorumFraction`) as a standalone, governor-agnostic ruleset — with
-///         **mutable votes**: re-voting while the poll is open replaces the standing vote
-///         (Nexus 2, D13), the one deliberate divergence from the live ENS governor, which
-///         reverts instead.
+///         **mutable votes**: re-voting while the poll is open replaces the standing vote —
+///         a deliberate divergence from the live ENS governor, which reverts instead.
 /// @dev Counting mechanics (buckets, receipts, replace-on-re-vote) come from `RulesetCounting`;
 ///      this contract owns only the rules layered on top. Note the base's non-monotonicity
 ///      warning: `quorumReached` and `voteSucceeded` can flip in **both** directions while
-///      voting is open, so neither may be used to arm one-shot state (D16 / finding F2).
+///      voting is open, so neither may be used to arm one-shot state.
 ///
-///      Immutable by design (D7: "What the DAO audited is what runs forever") — no setters,
+///      Immutable by design — what the DAO audited is what runs forever: no setters,
 ///      including for the quorum numerator. `countVote` is state-changing and therefore
 ///      restricted to `governor`, so third parties cannot stuff vote tallies.
 contract StandardRuleset is RulesetCounting {
@@ -37,7 +36,7 @@ contract StandardRuleset is RulesetCounting {
     }
 
     /// @dev Fixed at 100 so a numerator of 1 encodes 1%, matching OZ's default
-    ///      `GovernorVotesQuorumFraction` denominator. Not exposed — the brief calls for no
+    ///      `GovernorVotesQuorumFraction` denominator. Not exposed — this ruleset offers no
     ///      surface beyond `IRuleset`, and this value is not overridable.
     uint256 private constant QUORUM_DENOMINATOR = 100;
 
@@ -51,7 +50,7 @@ contract StandardRuleset is RulesetCounting {
 
     /// @param governor_ The GovernorNexus this ruleset is deployed for; immutable and never
     ///        revisited, so it must be the address the governor will actually deploy to (see
-    ///        the deploy script's CREATE-address precompute for the chicken-and-egg fix).
+    ///        the deploy script's CREATE-address precompute).
     /// @param token_ Voting token backing `quorum`'s past-total-supply lookup.
     /// @param quorumNumerator_ Numerator over the fixed 100 denominator; reverts
     ///        `InvalidQuorumFraction` above 100.
@@ -70,7 +69,7 @@ contract StandardRuleset is RulesetCounting {
     ///      timepoint 0) — callers must gate on proposal existence; the governor does this
     ///      via `state()`.
     ///
-    ///      Non-monotonic under re-votes (D16): a voter moving weight out of For/Abstain can
+    ///      Non-monotonic under re-votes: a voter moving weight out of For/Abstain can
     ///      take a proposal back *below* quorum after it had been reached.
     function quorumReached(uint256 proposalId) external view returns (bool) {
         uint256 forVotes = tally(proposalId, uint8(VoteType.For));
@@ -80,7 +79,7 @@ contract StandardRuleset is RulesetCounting {
     }
 
     /// @inheritdoc IRuleset
-    /// @dev Non-monotonic under re-votes (D16) — see `quorumReached`.
+    /// @dev Non-monotonic under re-votes — see `quorumReached`.
     function voteSucceeded(uint256 proposalId) external view returns (bool) {
         return tally(proposalId, uint8(VoteType.For)) > tally(proposalId, uint8(VoteType.Against));
     }
@@ -89,7 +88,7 @@ contract StandardRuleset is RulesetCounting {
     ///         `proposalVotes` (same name, same return order) so tooling pointed at the governor
     ///         via `governor.proposalRuleset(id)` and then this getter just works.
     /// @dev The Bravo-shaped view of the base's generic buckets. An id this ruleset never counted
-    ///      returns all-zero, never reverts. Non-monotonic under re-votes (D16).
+    ///      returns all-zero, never reverts. Non-monotonic under re-votes.
     function proposalVotes(uint256 proposalId)
         external
         view
