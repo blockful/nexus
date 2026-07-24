@@ -9,9 +9,9 @@ import {IRuleset} from "../../src/IRuleset.sol";
 /// @title Malicious / broken ruleset mocks for the adversarial suite
 /// @notice Each concrete ruleset below embodies exactly ONE attack or failure mode against a
 ///         GovernorNexus core, so `GovernorNexus.adversarial.t.sol` can pin the blast radius
-///         the spec (§8) promises: a bad ruleset breaks voting on ITS OWN proposals only.
+///         the core guarantees: a bad ruleset breaks voting on ITS OWN proposals only.
 /// @dev All variants advertise `IRuleset` via ERC165 so they pass registration — the trust
-///      boundary is procedural (spec D3: rulesets are DAO-vote-gated code), not a runtime
+///      boundary is procedural (rulesets are DAO-vote-gated code), not a runtime
 ///      interface check, so a malicious ruleset that implements the interface WILL register.
 
 /// @dev Shared plumbing: ERC165 advertisement + the inert view surface (`quorum`,
@@ -117,8 +117,8 @@ contract RevertingRuleset is AdversarialRulesetBase {
 
 /// @notice Attack: outcome views always return `true`, recording nothing.
 /// @dev Makes its proposal Succeed after the deadline with ZERO votes cast. This is the
-///      accepted-risk consequence of D3 (rulesets are trusted DAO-approved code); the suite
-///      documents the blast radius, it is not a core bug.
+///      accepted-risk consequence of the trust model (rulesets are trusted DAO-approved
+///      code); the suite documents the blast radius, it is not a core bug.
 contract LyingRuleset is AdversarialRulesetBase {
     constructor(address governor_) AdversarialRulesetBase(governor_) {}
 

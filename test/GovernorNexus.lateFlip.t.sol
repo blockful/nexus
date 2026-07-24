@@ -203,8 +203,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
 
     /// @dev The oscillation that burns OZ-style one-shot slots. Crossing early, re-voting
     ///      down, and sniping late must CAUSE the extension, not consume it.
-    function test_f2Oscillation_cannotBurnExtension() public {
-        (uint256 id, uint256 t) = _proposeActive("F2 oscillation");
+    function test_oscillation_cannotBurnExtension() public {
+        (uint256 id, uint256 t) = _proposeActive("threshold oscillation");
 
         _vote(alice, id, 0); // failing baseline
         vm.roll(t - 18);
@@ -352,8 +352,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
     /// @dev The core invariant, model-checked: for arbitrary bounded cast sequences,
     ///      the effective deadline is T+E iff (some in-window evaluation — pre- or post-cast —
     ///      observed a failing state) AND (the outcome at T is passing); otherwise T. The
-    ///      model mirrors D33's observation points exactly, which is sound because tallies
-    ///      only change inside casts.
+    ///      model mirrors the implementation's observation points exactly, which is sound
+    ///      because tallies only change inside casts.
     function testFuzz_extensionMatchesLowWaterPredicate(uint8[4] memory sups, uint8[4] memory offsets) public {
         (uint256 id, uint256 t) = _proposeActive("fuzz low-water");
         uint256 snapshot = governor.proposalSnapshot(id);

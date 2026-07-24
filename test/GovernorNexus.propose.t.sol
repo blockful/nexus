@@ -199,7 +199,7 @@ contract GovernorNexusProposeTest is GovernorNexusTestBase {
         assertEq(address(governor.proposalRuleset(id1)), address(rs1));
     }
 
-    // ─────────────── 8. Duplicate payload reverts across types (D2) ───────────────
+    // ─────────────── 8. Duplicate payload reverts across types ───────────────
 
     function test_duplicatePayload_revertsAcrossTypes() public {
         _registerType1();
@@ -220,7 +220,7 @@ contract GovernorNexusProposeTest is GovernorNexusTestBase {
     }
 
     // ──────────── 9+10. Pin invariant on both doors + transient context cleared ────────────
-    // D10: `_propose` cannot be sealed (it is the sole ProposalCore writer, reached via
+    // `_propose` cannot be sealed (it is the sole ProposalCore writer, reached via
     // `super`), so the invariant it protected is asserted instead: every proposal created
     // through either public door carries a pin (also asserted in tests 1 and 7), and the
     // transient type context never leaks into a later propose in the same transaction.

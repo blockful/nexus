@@ -12,7 +12,7 @@ import {ENSParams} from "../src/ENSParams.sol";
 import {Box} from "./mocks/Box.sol";
 import {MockENSToken} from "./mocks/MockENSToken.sol";
 
-/// @dev Unit suite for the stock scaffold, configured with the live ENS parameters.
+/// @dev Unit suite for `ENSGovernor`, configured with the live ENS parameters.
 ///      Exercises the full lifecycle against a mock token + fresh timelock; the fork
 ///      suite (test/fork) repeats this against the real token/timelock and live governor.
 contract ENSGovernorTest is Test {

@@ -283,7 +283,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     // ─────────────────── Containment: poisoned ruleset cannot brick propose ───────────────────
 
     function test_poisonedRulesetProposal_doesNotBrickProposersNextPropose() public {
-        // register a ruleset whose outcome views revert (the Nexus 1 adversarial mock)
+        // register a ruleset whose outcome views revert (the adversarial mock)
         RevertingViewsRuleset rv = new RevertingViewsRuleset(address(governor));
         uint8 badType = uint8(governor.typeCount());
         _executeSelfCall(

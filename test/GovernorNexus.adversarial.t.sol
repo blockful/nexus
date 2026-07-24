@@ -27,11 +27,11 @@ contract FakeInterfaceRuleset is IERC165 {
 }
 
 /// @title GovernorNexus adversarial suite
-/// @notice Attack-first tests pinning the EXACT blast radius the spec (§8) promises: a
+/// @notice Attack-first tests pinning the EXACT blast radius the core guarantees: a
 ///         malicious/broken ruleset can break voting on ITS OWN proposals only. It must never
 ///         corrupt core lifecycle state, reach `onlyGovernance` surface, affect proposals
 ///         pinned to other types, let third parties stuff tallies, or let the registry accept
-///         junk. Rulesets are DAO-vote-gated code (trust boundary is procedural — spec D3), so
+///         junk. Rulesets are DAO-vote-gated code (the trust boundary is procedural), so
 ///         some outcomes (e.g. LyingRuleset succeeding with zero votes) are ACCEPTED risks this
 ///         suite documents rather than bugs the core prevents.
 /// @dev Reuses `GovernorNexusTestBase` (alice funds the whole supply, so any standard-quorum
@@ -157,12 +157,12 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
 
     // ═══════════════════════ LyingRuleset ═══════════════════════
 
-    /// @dev ACCEPTED RISK (spec D3): a ruleset whose outcome views always return true carries
+    /// @dev ACCEPTED RISK: a ruleset whose outcome views always return true carries
     ///      its proposal to Succeeded — and through queue/execute — with ZERO votes cast. This
     ///      is the trust model: rulesets are DAO-vote-gated code, so this is caught by process
     ///      (audit + the registration vote), not by the core. The test documents the blast
     ///      radius and pins that proposals on OTHER types are unaffected.
-    function test_lyingRuleset_succeedsAndExecutesWithZeroVotes_acceptedRiskD3() public {
+    function test_lyingRuleset_succeedsAndExecutesWithZeroVotes_acceptedRisk() public {
         LyingRuleset lyingRuleset = new LyingRuleset(address(governor));
         uint8 badType = _registerType(lyingRuleset, 0, "register lying ruleset");
 

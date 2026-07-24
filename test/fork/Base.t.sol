@@ -35,7 +35,7 @@ abstract contract BaseTest is Test {
         // token nowadays); override with MAINNET_RPC_URL for a dedicated key.
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://eth.drpc.org")), FORK_BLOCK);
 
-        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // Wiring: StandardRuleset.countVote is onlyGovernor and
         // quorumReached reads governor.proposalSnapshot, so the ruleset must be constructed
         // with the governor's address — but the governor constructor needs the ruleset. Break
         // the cycle by precomputing the governor's CREATE address (this deployer's next nonce
@@ -44,7 +44,7 @@ abstract contract BaseTest is Test {
         standardRuleset = new StandardRuleset(predictedGovernor, IVotes(ENSParams.TOKEN), ENSParams.QUORUM_NUMERATOR);
 
         // Name "ENS Governor" so `name()` and the EIP-712 vote-by-sig domain match the live
-        // governor (D11). Type 0 = StandardRuleset with the live ENS params.
+        // governor. Type 0 = StandardRuleset with the live ENS params.
         scaffold = new GovernorNexus(
             "ENS Governor",
             IVotes(ENSParams.TOKEN),

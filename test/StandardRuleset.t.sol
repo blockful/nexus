@@ -126,9 +126,9 @@ contract StandardRulesetTest is Test {
         ruleset.countVote(PROPOSAL_ID, alice, 3, 600e18, "");
     }
 
-    // ─────────────────────────── Revote (Nexus 2, D12/D13) ───────────────────────────
+    // ─────────────────────────── Revote ───────────────────────────
 
-    /// @dev The one semantic delta vs Nexus 1 (and vs the live ENS governor, which reverts):
+    /// @dev The one semantic delta vs the live ENS governor (which reverts):
     ///      re-voting replaces the standing vote. Mechanics are covered in `RulesetCounting.t.sol`;
     ///      here we pin that StandardRuleset inherits them and that its *rules* follow the tally.
     function test_countVote_revoteReplacesPreviousVote() public {
@@ -145,7 +145,7 @@ contract StandardRulesetTest is Test {
         assertTrue(ruleset.voteSucceeded(PROPOSAL_ID));
 
         _countVote(alice, 0, 600e18);
-        assertFalse(ruleset.voteSucceeded(PROPOSAL_ID), "success is non-monotonic under re-votes (D16)");
+        assertFalse(ruleset.voteSucceeded(PROPOSAL_ID), "success is non-monotonic under re-votes");
     }
 
     function test_quorumReached_flipsBackToFalseOnRevoteToZeroWeightBucket() public {
@@ -156,7 +156,7 @@ contract StandardRulesetTest is Test {
         assertTrue(ruleset.quorumReached(PROPOSAL_ID));
 
         _countVote(bob, 0, 350e18); // against does not count toward quorum
-        assertFalse(ruleset.quorumReached(PROPOSAL_ID), "quorum is non-monotonic under re-votes (D16)");
+        assertFalse(ruleset.quorumReached(PROPOSAL_ID), "quorum is non-monotonic under re-votes");
     }
 
     function test_hasVoted_reflectsState() public {

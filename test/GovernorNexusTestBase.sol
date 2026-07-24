@@ -14,8 +14,8 @@ import {MockENSToken} from "./mocks/MockENSToken.sol";
 ///      `GovernorNexus` + bootstrap ruleset, funds a majority voter, and provides the
 ///      governance loop that is the only path to the `onlyGovernance` setters.
 ///
-///      With real ruleset counting in place (Task 4) the suites run against production
-///      `GovernorNexus` directly — no counting mixin, no subclass. The bootstrap ruleset's
+///      The suites run against production `GovernorNexus` directly — no counting mixin,
+///      no subclass. The bootstrap ruleset's
 ///      1% quorum is trivially cleared by alice's 2_000_000e18 (the only funded holder here,
 ///      so total supply == her balance), keeping the governance loop passing.
 abstract contract GovernorNexusTestBase is Test {
@@ -44,7 +44,7 @@ abstract contract GovernorNexusTestBase is Test {
         token = new MockENSToken();
         timelock = new TimelockController(TIMELOCK_DELAY, new address[](0), new address[](0), address(this));
 
-        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // Wiring: StandardRuleset.countVote is onlyGovernor and
         // quorumReached reads governor.proposalSnapshot, so the bootstrap ruleset must know
         // the governor address — but the governor constructor needs the ruleset. Break the
         // cycle by precomputing the governor's CREATE address (this deployer's next nonce

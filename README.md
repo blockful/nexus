@@ -104,7 +104,7 @@ surface (`execute`/`relay`/`receive`) is exactly what makes Multicall the msg.va
 bug class, and an explicit signature keeps the batch semantics (single nonce spend,
 all-or-nothing) auditable in one place.
 
-## Spam limit (Nexus 4)
+## Spam limit
 
 `GovernorNexus` caps how many proposals a single proposer can hold concurrently live —
 `Pending` or `Active`, nothing else: a proposal that already survived its vote (`Queued`)
@@ -282,8 +282,8 @@ Accepted residuals:
 | `test/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
 | `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
-| `test/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap (Nexus 4) |
-| `test/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel (Nexus 5) |
+| `test/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap |
+| `test/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel |
 | `test/GovernorNexus.bond.t.sol` | Unit suite: bond ruleset wired into the governor — lock at propose, cancel-partition resolution |
 | `test/BondRuleset.t.sol` | Unit suite: bond custody, slash predicate table, cancel partition, constructor guards |
 | `test/BondRuleset.invariant.t.sol` | Invariant/fuzz suite: bond custody solvency across randomized propose/vote/cancel/resolve sequences |
@@ -312,19 +312,17 @@ forge coverage --no-match-path "test/fork/*" --report summary
 Fork tests pin block 25,445,220 and default to a public archive RPC; set
 `MAINNET_RPC_URL` for a dedicated endpoint (also the name of the CI secret).
 
-## Milestones
+## Gas benchmarks
 
-Branches, PR titles, and spec docs are named by milestone ("Nexus N"); the sections above
-describe each mechanism without that vocabulary. The decoder:
+`test/fork/GasBench.t.sol` runs an A/B benchmark on the same mainnet fork: the live ENS
+governor (real deployed bytecode, real token checkpoint history) vs GovernorNexus, both
+running identical payloads through the same helpers. Gas is the `gasleft()` delta around
+the single measured call, excluding setup/fixture cost. Reference numbers at block
+25,445,220:
 
-| Milestone | What landed |
-|---|---|
-| Nexus 0 | Stock OZ baseline (`ENSGovernor.sol`) reproducing the live ENS governor |
-| Nexus 1 | Modular governor core — proposal-type registry + pluggable rulesets |
-| Nexus 2 | Mutable votes — a re-vote replaces the standing vote |
-| Nexus 3 | Anti-snipe late-vote extension ([spec](docs/specs/2026-07-17-nexus3-late-vote-extension.md)) |
-| Nexus 4 | Spam limit — per-proposer cap on concurrently live proposals |
-| Nexus 5 | Cancellation — proposer self-cancel + continuous-threshold permissionless cancel |
-| Nexus 6 | Batch voting — `castVoteWithReasonAndParamsBatch` |
-| Nexus 7 | Optimistic ruleset — pass-unless-vetoed + the propose-time validation gate ([spec](docs/specs/2026-07-22-nexus7-optimistic-ruleset.md)) |
-| Nexus 8 | Bond ruleset — lock-to-propose, spam-slash predicate, cancel-partition custody |
+| op | live gov | GovernorNexus | delta | attribution |
+|---|---:|---:|---:|---|
+| propose | 115,052 | 102,838 | -12,214 | Net cheaper despite the type-pin SSTORE, transient-context writes, and the extra `ProposalTypedCreated` event — OZ v5's packed `ProposalCore` beats the live governor's own storage layout by more than those add. |
+| castVote | 106,982 | 109,969 | +2,987 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE) — matches the expected ~+2.9k. |
+| queue | 102,244 | 117,983 | +15,739 | `queue()`'s state-bitmap check re-derives quorum/success by calling out to the ruleset, which itself calls back into the governor (`proposalSnapshot`) and out to the token (`getPastTotalSupply`) — a multi-hop CALL chain the live governor's local tally doesn't pay. |
+| execute | 79,188 | 59,747 | -19,441 | Net cheaper; `execute()`'s state check re-runs the same ruleset CALL chain as `queue()`, so the sign flip is attributed to the live governor's own (opaque, bytecode-only) execute-path bookkeeping rather than anything ruleset-side. |

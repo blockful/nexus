@@ -12,11 +12,10 @@ import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extens
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-/// @title ENSGovernor (stock scaffold)
-/// @notice Unmodified OZ v5.6.1 governor composition — the production baseline for
-///         Governor Nexus (milestone 0). Zero custom logic on purpose: every mechanism
-///         lands in later milestones on top of this contract, and the fork suite proves
-///         this baseline behaves like the live ENS governor before anything is added.
+/// @title ENSGovernor
+/// @notice Unmodified OZ v5.6.1 governor composition — the baseline Governor Nexus builds
+///         on. Zero custom logic on purpose: the fork suite proves this baseline behaves
+///         like the live ENS governor.
 contract ENSGovernor is
     Governor,
     GovernorSettings,
