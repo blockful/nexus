@@ -5,10 +5,10 @@ import {Test} from "forge-std/Test.sol";
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {IProposalValidator} from "../src/IProposalValidator.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {OptimisticRuleset} from "../src/OptimisticRuleset.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
+import {IProposalValidator} from "../../src/interfaces/IProposalValidator.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {OptimisticRuleset} from "../../src/rulesets/OptimisticRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
 
 /// @dev Isolated unit suite. The ruleset reads nothing from its governor (no quorum, no
 ///      snapshot, no token), so a plain address suffices as the `onlyGovernor` caller —

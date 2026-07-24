@@ -323,31 +323,31 @@ Accepted residuals:
 |---|---|
 | `src/GovernorNexus.sol` | Governor core — proposal-type registry, per-proposal pin, ruleset dispatch |
 | `src/GovernorPreventLateFlip.sol` | **Anti-snipe extension**, an abstract Governor module (window low-water mark, lazy deadline extension) — reusable by any OZ v5 governor, hardened for mutable votes |
-| `src/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
+| `src/interfaces/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
 | `src/RulesetCounting.sol` | Counting base every ruleset inherits — Bravo buckets, per-voter receipts, **mutable votes** (a re-vote replaces the standing vote) |
-| `src/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
-| `src/IProposalValidator.sol` | Optional ruleset extension — propose-time content-validation hook (carries `descriptionHash`), ERC165-detected at registration; drives the optimistic gate and `BondRuleset`'s bond lock |
-| `src/OptimisticRuleset.sol` | Optimistic ruleset — pass-unless-vetoed outcome + propose-time proposer/action allowlists |
-| `src/BondRuleset.sol` | **Lock-to-propose ruleset** — fourth ballot option, bond custody (lock/refund/forfeit), spam-slash predicate |
+| `src/rulesets/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
+| `src/interfaces/IProposalValidator.sol` | Optional ruleset extension — propose-time content-validation hook (carries `descriptionHash`), ERC165-detected at registration; drives the optimistic gate and `BondRuleset`'s bond lock |
+| `src/rulesets/OptimisticRuleset.sol` | Optimistic ruleset — pass-unless-vetoed outcome + propose-time proposer/action allowlists |
+| `src/rulesets/BondRuleset.sol` | **Lock-to-propose ruleset** — fourth ballot option, bond custody (lock/refund/forfeit), spam-slash predicate |
 | `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
 | `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
-| `test/GovernorNexus.registry.t.sol` | Unit suite: type registration, activation, default-pointer moves |
-| `test/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
-| `test/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
-| `test/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
-| `test/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap |
-| `test/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel |
-| `test/GovernorNexus.bond.t.sol` | Unit suite: bond ruleset wired into the governor — lock at propose, cancel-partition resolution |
-| `test/BondRuleset.t.sol` | Unit suite: bond custody, slash predicate table, cancel partition, constructor guards |
-| `test/BondRuleset.invariant.t.sol` | Invariant/fuzz suite: bond custody solvency across randomized propose/vote/cancel/resolve sequences |
-| `test/BondRulesetTestBase.sol` | Shared fixture for the bond suites above |
-| `test/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
-| `test/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
-| `test/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
-| `test/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
-| `test/OptimisticRuleset.t.sol` | Unit + fuzz suite for the optimistic ruleset: veto boundary, validator rules, allowlist setters |
-| `test/GovernorNexus.proposalValidation.t.sol` | Integration suite for the propose-time validation gate (mock validators only): detection/pinning, revert propagation, misbehaving-validator containment |
-| `test/GovernorNexus.optimistic.t.sol` | Integration suite for the optimistic type: validation rules through the gate, allowlist governance loop, e2e lifecycle, veto-withdrawal × anti-snipe |
+| `test/governor/GovernorNexus.registry.t.sol` | Unit suite: type registration, activation, default-pointer moves |
+| `test/governor/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
+| `test/governor/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
+| `test/governor/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
+| `test/governor/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap |
+| `test/governor/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel |
+| `test/governor/GovernorNexus.bond.t.sol` | Unit suite: bond ruleset wired into the governor — lock at propose, cancel-partition resolution |
+| `test/rulesets/BondRuleset.t.sol` | Unit suite: bond custody, slash predicate table, cancel partition, constructor guards |
+| `test/rulesets/BondRuleset.invariant.t.sol` | Invariant/fuzz suite: bond custody solvency across randomized propose/vote/cancel/resolve sequences |
+| `test/rulesets/BondRulesetTestBase.sol` | Shared fixture for the bond suites above |
+| `test/governor/GovernorNexusTestBase.sol` | Shared fixture the suites above inherit (deploy wiring + governance-loop helpers) |
+| `test/governor/GovernorNexus.lateFlip.t.sol` | Unit + fuzz suite for the late-flip extension: trigger matrix, oscillation/burn attempts, lazy materialization, model-checked fuzz |
+| `test/rulesets/RulesetCounting.t.sol` | Unit + fuzz suite for the counting base: re-vote replace mechanics, tally conservation, receipt width guard |
+| `test/rulesets/StandardRuleset.t.sol` | Unit suite for the bootstrap ruleset |
+| `test/rulesets/OptimisticRuleset.t.sol` | Unit + fuzz suite for the optimistic ruleset: veto boundary, validator rules, allowlist setters |
+| `test/governor/GovernorNexus.proposalValidation.t.sol` | Integration suite for the propose-time validation gate (mock validators only): detection/pinning, revert propagation, misbehaving-validator containment |
+| `test/governor/GovernorNexus.optimistic.t.sol` | Integration suite for the optimistic type: validation rules through the gate, allowlist governance loop, e2e lifecycle, veto-withdrawal × anti-snipe |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
 | `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `ValidatorRulesets`, `Box` test target |
 | `test/fork/` | Mainnet-fork suites: behavioral parity (live governor vs GovernorNexus) + A/B gas benchmark |

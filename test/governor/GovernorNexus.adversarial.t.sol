@@ -4,18 +4,18 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {Box} from "./mocks/Box.sol";
+import {Box} from "../mocks/Box.sol";
 import {
     LyingRuleset,
     ReentrantRuleset,
     RevertingRuleset,
     RevertingViewsRuleset,
     WeightInflatingRuleset
-} from "./mocks/MaliciousRulesets.sol";
+} from "../mocks/MaliciousRulesets.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — a ruleset that lies about its interface. Mirrors the
 ///      registry suite's `Mock165`; used here from the attack angle in the consolidated

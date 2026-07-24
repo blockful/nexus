@@ -4,8 +4,8 @@ pragma solidity ^0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
-import {BondRuleset} from "../src/BondRuleset.sol";
-import {BondRulesetTestBase} from "./BondRulesetTestBase.sol";
+import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
+import {BondRulesetTestBase} from "../rulesets/BondRulesetTestBase.sol";
 
 /// @dev Integration suite for `resolveBond` against the real `GovernorNexus` + timelock —
 ///      the spam-slash predicate (a defeated proposal forfeits its bond when the vote judges it

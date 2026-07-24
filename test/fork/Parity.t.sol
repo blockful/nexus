@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {ENSParams} from "../../src/ENSParams.sol";
-import {StandardRuleset} from "../../src/StandardRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {Box, BaseTest} from "./Base.t.sol";
 import {IGov} from "./IGov.sol";
 

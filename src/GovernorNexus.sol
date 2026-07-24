@@ -10,8 +10,8 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 
 import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
-import {IProposalValidator} from "./IProposalValidator.sol";
-import {IRuleset} from "./IRuleset.sol";
+import {IProposalValidator} from "./interfaces/IProposalValidator.sol";
+import {IRuleset} from "./interfaces/IRuleset.sol";
 
 /// @title GovernorNexus
 /// @notice Modular ENS governor core. Replaces OZ's baked-in settings/counting/quorum

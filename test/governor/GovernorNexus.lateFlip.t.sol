@@ -5,8 +5,8 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {Vm} from "forge-std/Vm.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {GovernorPreventLateFlip} from "../src/GovernorPreventLateFlip.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {GovernorPreventLateFlip} from "../../src/GovernorPreventLateFlip.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Anti-snipe late-vote extension. The mechanism's public surface is deliberately

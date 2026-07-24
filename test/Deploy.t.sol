@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 import {Deploy} from "../script/Deploy.s.sol";
 import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {StandardRuleset} from "../src/rulesets/StandardRuleset.sol";
 import {ENSParams} from "../src/ENSParams.sol";
 
 /// @dev Exercises `Deploy.run()` exactly as `forge script` would invoke it: no fork, no
