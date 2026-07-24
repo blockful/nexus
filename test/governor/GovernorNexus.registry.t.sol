@@ -5,9 +5,9 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — exercises the "165 but wrong interface" guardrail.

@@ -7,12 +7,12 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {Box} from "./mocks/Box.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {Box} from "../mocks/Box.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
 
 /// @dev Full-lifecycle suite for GovernorNexus with real ruleset dispatch. Unlike the
 ///      registry/propose suites (which use a trivial harness fixture), this deploys plain

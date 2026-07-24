@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
-import {RulesetCounting} from "../src/RulesetCounting.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
 
 /// @dev Concrete stand-in for the abstract base: the mutable-vote counting mechanics live
 ///      entirely in `RulesetCounting`, so a ruleset whose *rules* are stubs is enough to

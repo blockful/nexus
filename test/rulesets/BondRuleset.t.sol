@@ -5,12 +5,12 @@ import {Test} from "forge-std/Test.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {BondRuleset} from "../src/BondRuleset.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {IProposalValidator} from "../src/IProposalValidator.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
-import {FeeOnTransferToken} from "./mocks/FeeOnTransferToken.sol";
+import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {IProposalValidator} from "../../src/interfaces/IProposalValidator.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
+import {FeeOnTransferToken} from "../mocks/FeeOnTransferToken.sol";
 
 contract MockSnapshotGovernor {
     uint256 public snapshot;

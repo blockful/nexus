@@ -7,7 +7,7 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {GovernorNexus} from "../../src/GovernorNexus.sol";
-import {StandardRuleset} from "../../src/StandardRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {ENSParams} from "../../src/ENSParams.sol";
 import {Box} from "../mocks/Box.sol";
 import {IGov} from "./IGov.sol";

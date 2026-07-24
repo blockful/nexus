@@ -4,8 +4,8 @@ pragma solidity 0.8.30;
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {IRuleset} from "./IRuleset.sol";
-import {RulesetCounting} from "./RulesetCounting.sol";
+import {IRuleset} from "../interfaces/IRuleset.sol";
+import {RulesetCounting} from "../RulesetCounting.sol";
 
 /// @dev Minimal governor surface StandardRuleset consumes — only `proposalSnapshot`, so a
 ///      registry or test can satisfy this with a trivial stand-in instead of a full governor.

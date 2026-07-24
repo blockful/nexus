@@ -4,9 +4,9 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {Test} from "forge-std/Test.sol";
 
-import {BondRuleset} from "../src/BondRuleset.sol";
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
 import {BondRulesetTestBase} from "./BondRulesetTestBase.sol";
 
 /// @dev Drives randomized propose/vote/roll/resolve/queueExecute/cancelGov sequences against

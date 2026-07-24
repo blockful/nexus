@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {GovernorNexus} from "../../src/GovernorNexus.sol";
-import {IRuleset} from "../../src/IRuleset.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 
 /// @title Malicious / broken ruleset mocks for the adversarial suite
 /// @notice Each concrete ruleset below embodies exactly ONE attack or failure mode against a

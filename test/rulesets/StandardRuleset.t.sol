@@ -6,11 +6,11 @@ import {Test} from "forge-std/Test.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {IRuleset} from "../src/IRuleset.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
-import {MockGovernor} from "./mocks/MockGovernor.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
+import {MockGovernor} from "../mocks/MockGovernor.sol";
 
 /// @dev Isolated unit suite: no governor implementation exists yet, so `MockGovernor`
 ///      supplies the one method StandardRuleset consumes (`proposalSnapshot`) and doubles

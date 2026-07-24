@@ -6,9 +6,9 @@ import {Test} from "forge-std/Test.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
 
 /// @dev Shared fixture for GovernorNexus unit suites: deploys token + timelock + plain
 ///      `GovernorNexus` + bootstrap ruleset, funds a majority voter, and provides the

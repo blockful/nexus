@@ -7,9 +7,9 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {IRuleset} from "./IRuleset.sol";
-import {IProposalValidator} from "./IProposalValidator.sol";
-import {RulesetCounting} from "./RulesetCounting.sol";
+import {IRuleset} from "../interfaces/IRuleset.sol";
+import {IProposalValidator} from "../interfaces/IProposalValidator.sol";
+import {RulesetCounting} from "../RulesetCounting.sol";
 
 /// @dev Minimal governor surface BondRuleset consumes (StandardRuleset's IRulesetGovernor
 ///      pattern, extended with the two reads the settle path needs).

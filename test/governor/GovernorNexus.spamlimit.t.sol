@@ -4,11 +4,11 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {RevertingViewsRuleset} from "./mocks/MaliciousRulesets.sol";
+import {RevertingViewsRuleset} from "../mocks/MaliciousRulesets.sol";
 
 /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals, lazily pruned
 ///      at propose time. `bob`/`carol` are the spam subjects so `alice` stays free for

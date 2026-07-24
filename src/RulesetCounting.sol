@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.30;
 
-import {IRuleset} from "./IRuleset.sol";
+import {IRuleset} from "./interfaces/IRuleset.sol";
 
 /// @title RulesetCounting
 /// @notice Shared vote-counting mechanics for every GovernorNexus ruleset: support buckets,
