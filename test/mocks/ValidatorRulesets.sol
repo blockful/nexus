@@ -3,8 +3,8 @@ pragma solidity ^0.8.30;
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {IProposalValidator} from "../../src/IProposalValidator.sol";
-import {IRuleset} from "../../src/IRuleset.sol";
+import {IProposalValidator} from "../../src/interfaces/IProposalValidator.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 
 /// @title Validator ruleset mocks for the propose-time validation gate suite
 /// @notice Each concrete ruleset below differs from a plain inert ruleset by exactly one

@@ -3,10 +3,10 @@ pragma solidity ^0.8.30;
 
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {BondRuleset} from "../src/BondRuleset.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {GovernorNexusTestBase} from "../governor/GovernorNexusTestBase.sol";
 
 /// @dev Extends the shared fixture with a registered bond type (proposalThreshold = 0, making
 ///      proposing permissionless), a fund-but-no-VP proposer, and a council address holding the

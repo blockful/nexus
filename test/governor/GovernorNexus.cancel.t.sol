@@ -4,11 +4,11 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {RevertingViewsRuleset} from "./mocks/MaliciousRulesets.sol";
+import {RevertingViewsRuleset} from "../mocks/MaliciousRulesets.sol";
 
 /// @dev Cancellation policy: cancel is possible only while the proposal is Pending|Active —
 ///      by the proposer unconditionally, or by ANYONE when the proposer's prior-block votes
@@ -229,7 +229,7 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
         _cancelAs(carol, "p");
     }
 
-    // ─────────────────────── F5: prior-block read, churn window ───────────────────────
+    // ─────────────────────── Prior-block read, churn window ───────────────────────
 
     function test_dipAtPriorBlock_cancellableEvenIfRestoredNow() public {
         uint256 id = _proposeAs(bob, "p");
@@ -314,7 +314,7 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
 
     function test_poisonedRulesetType_selfCancelWorks_withinDeadline() public {
         // a ruleset with reverting views must not block cancel while state() still
-        // resolves from core storage (pre-deadline) — Nexus 1 containment boundary.
+        // resolves from core storage (pre-deadline) — the core's containment boundary.
         RevertingViewsRuleset poisoned = new RevertingViewsRuleset(address(governor));
         _executeSelfCall(
             abi.encodeCall(
