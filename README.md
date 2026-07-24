@@ -25,11 +25,11 @@ Governor Nexus uses a modular router architecture:
 flowchart TD
     U(("Users")) -->|"propose · castVote"| CORE["<b>Governor Nexus Core</b><br/>proposal lifecycle · type registry · timelock admin"]
     CORE -->|"queue · execute"| TL["ENS Timelock"]
-    CORE <-->|"counting · quorum · success ·<br/>propose-time validation"| RS
+    CORE <--> RS
 
     subgraph RS["Pluggable rulesets — one per proposal type"]
         direction LR
-        S["Standard<br/>type 0 · live-ENS parity"] ~~~ O["Optimistic<br/>pass-unless-vetoed"] ~~~ B["Bond<br/>lock-to-propose"] ~~~ M["… future modules,<br/>added by governance"]
+        S["Standard<br/>type 0 · live-ENS parity"] ~~~ O["Optimistic<br/>pass-unless-vetoed"] ~~~ B["Bond<br/>lock-to-propose"]
     end
 ```
 
