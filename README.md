@@ -15,25 +15,53 @@ deliberate divergences are pinned as such by the fork suite.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    V(("Voter /<br/>Proposer")) -->|"propose · castVote"| G
+
+    subgraph G["GovernorNexus core"]
+        direction TB
+        R["Proposal-type registry<br/>append-only · vote-governed"]
+        X["anti-snipe extension · spam limit<br/>batch voting · cancellation policy"]
+    end
+
+    R -->|"type 0 (default)"| S["StandardRuleset<br/>live-ENS parity"]
+    R -->|"type n"| O["OptimisticRuleset<br/>pass-unless-vetoed"]
+    R -->|"type m"| B["BondRuleset<br/>lock-to-propose"]
+
+    S -. "inherit" .-> C["RulesetCounting<br/>Bravo buckets · mutable votes"]
+    O -.-> C
+    B -.-> C
+
+    G -->|"queue · execute"| T["ENS Timelock"]
+```
+
+The three rulesets shown are the production ones; the registry accepts any future
+`IRuleset` the DAO votes in. Quorum reads (`getPastVotes`/`getPastTotalSupply`) go from
+the ruleset to the ENS token.
+
 `GovernorNexus` generalizes the single hard-coded configuration of a stock governor into
-a vote-governed, append-only registry of proposal types: each type pins an external
-`IRuleset` plus its own voting delay, voting period, and proposal threshold, and once
-registered a type's ruleset and parameters never change — only its `active` flag and the
-registry's default pointer can move, both gated behind governance. Every proposal is
-pinned to exactly one type at creation, for its lifetime; the pin is looked up
-transiently (EIP-1153) only while the stock proposal-creation body runs, so the
-type-scoped delay/period never leak into externally observable state — safe because that
-body makes no state-committing external call while the context is set (its only external
-dispatch, the duplicate-proposal check, reverts unconditionally), so no reentrant reader
-can ever observe the typed values. Counting itself is
-never done by the core — `countVote`, `quorumReached`, `voteSucceeded`, and `hasVoted`
-all dispatch to the proposal's pinned ruleset, an immutable, single-purpose contract the
-DAO can swap per type without touching the governor. `StandardRuleset` is the bootstrap
-ruleset (registered as type 0, the initial default): it reproduces the live ENS
-governor's Bravo-style vote buckets (Against/For/Abstain) and fractional quorum exactly.
-Untyped surface — `votingDelay()`, `votingPeriod()`, `quorum()`, `COUNTING_MODE()` — reads
-the current default type's row, so the governor stays a drop-in `IGovernor` even though its
-real behavior is per-type.
+a vote-governed, append-only registry of proposal types:
+
+- **Each type pins an external `IRuleset`** plus its own voting delay, voting period, and
+  proposal threshold. Once registered, a type's ruleset and parameters never change — only
+  its `active` flag and the registry's default pointer can move, both gated behind
+  governance.
+- **Every proposal is pinned to exactly one type at creation, for its lifetime.** The pin
+  is looked up transiently (EIP-1153) only while the stock proposal-creation body runs, so
+  the type-scoped delay/period never leak into externally observable state — safe because
+  that body makes no state-committing external call while the context is set (its only
+  external dispatch, the duplicate-proposal check, reverts unconditionally), so no
+  reentrant reader can ever observe the typed values.
+- **Counting is never done by the core** — `countVote`, `quorumReached`, `voteSucceeded`,
+  and `hasVoted` all dispatch to the proposal's pinned ruleset, an immutable,
+  single-purpose contract the DAO can swap per type without touching the governor.
+- **`StandardRuleset` is the bootstrap ruleset** (registered as type 0, the initial
+  default): it reproduces the live ENS governor's Bravo-style vote buckets
+  (Against/For/Abstain) and fractional quorum exactly.
+- **The governor stays a drop-in `IGovernor`:** untyped surface — `votingDelay()`,
+  `votingPeriod()`, `quorum()`, `COUNTING_MODE()` — reads the current default type's row,
+  so the stock interface holds even though the real behavior is per-type.
 
 ## Mutable votes
 
@@ -90,9 +118,9 @@ Integrator notes:
   extension the event never fires — the views (or replaying `VoteCast` tallies against the
   immutable params) remain the source of truth.
 
+## Batch voting
 
-## Batch voting 
-(`castVoteWithReasonAndParamsBatch`) casts votes on several proposals in one transaction,
+`castVoteWithReasonAndParamsBatch` casts votes on several proposals in one transaction,
 all-or-nothing. A batch is a direct cast: it spends the voter's nonce once, so — like any
 direct vote — it invalidates the voter's outstanding signed ballots across all open
 proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
@@ -106,20 +134,24 @@ all-or-nothing) auditable in one place.
 
 ## Spam limit
 
-`GovernorNexus` caps how many proposals a single proposer can hold concurrently live —
-`Pending` or `Active`, nothing else: a proposal that already survived its vote (`Queued`)
-does not occupy a slot, and one that's `Canceled`/`Defeated`/`Executed` frees its slot
-immediately. This is a concurrency cap, not a rate limit — it bounds a key's in-flight
-governance-attention footprint, not how often it can propose over time. Enforcement is
-lazy: on each propose, the governor drops any of the proposer's tracked ids that left the
-live set, then reverts if the survivors already fill the cap; a proposal is added to the
-tracked set only after that check passes. The cap is governance-settable
-(`setMaxActiveProposals`) within `1..MAX_ACTIVE_PROPOSALS_CEILING` (10) — zero is rejected
-because it would revert every propose, including the governance proposal needed to raise
-it back — and deploys at 2 for the ENS migration (`ENSParams.MAX_ACTIVE_PROPOSALS`). The
-cap is per-address and, like `proposalThreshold`, does not resist an attacker willing to
-split voting power across multiple addresses — accepted, consistent with every per-address
-proposal cap in production governance (Bravo/Nouns/Uniswap all share this property).
+`GovernorNexus` caps how many proposals a single proposer can hold concurrently live:
+
+- **Live means `Pending` or `Active`, nothing else:** a proposal that already survived its
+  vote (`Queued`) does not occupy a slot, and one that's `Canceled`/`Defeated`/`Executed`
+  frees its slot immediately.
+- **A concurrency cap, not a rate limit** — it bounds a key's in-flight
+  governance-attention footprint, not how often it can propose over time.
+- **Enforcement is lazy:** on each propose, the governor drops any of the proposer's
+  tracked ids that left the live set, then reverts if the survivors already fill the cap;
+  a proposal is added to the tracked set only after that check passes.
+- **Governance-settable** (`setMaxActiveProposals`) within
+  `1..MAX_ACTIVE_PROPOSALS_CEILING` (10) — zero is rejected because it would revert every
+  propose, including the governance proposal needed to raise it back — and deploys at 2
+  for the ENS migration (`ENSParams.MAX_ACTIVE_PROPOSALS`).
+- **Per-address**, and, like `proposalThreshold`, it does not resist an attacker willing
+  to split voting power across multiple addresses — accepted, consistent with every
+  per-address proposal cap in production governance (Bravo/Nouns/Uniswap all share this
+  property).
 
 ## Optimistic ruleset
 
@@ -127,15 +159,19 @@ proposal cap in production governance (Bravo/Nouns/Uniswap all share this proper
 default** — there is no quorum, and the vote fails only if the Against bucket reaches an
 absolute veto threshold (500k ENS at the intended ENS registration) by the deadline. A
 proposal nobody voted on executes. Because the "voters judge the content" filter is gone,
-safety moves to propose time: the validator enforces that the **proposer is allowlisted**,
-every **`(target, selector)` action is allowlisted**, no action carries **ETH value**, and
-every action has at least a 4-byte selector — checking the three array lengths itself,
-before any indexing, with no reliance on downstream validation. The ruleset deploys with
-**empty allowlists**: day one the optimistic path can do nothing, and the DAO votes
-entries in through standard full-quorum governance (the setters answer only to the
-timelock). The action setter permanently refuses the governance core as a target — the
-governor, the timelock, and the ruleset itself — so a zero-vote proposal can never
-reconfigure the system that created it.
+safety moves to propose time — the validator enforces that:
+
+- the **proposer is allowlisted**;
+- every **`(target, selector)` action is allowlisted**;
+- no action carries **ETH value**;
+- every action has at least a 4-byte selector — checking the three array lengths itself,
+  before any indexing, with no reliance on downstream validation.
+
+The ruleset deploys with **empty allowlists**: day one the optimistic path can do nothing,
+and the DAO votes entries in through standard full-quorum governance (the setters answer
+only to the timelock). The action setter permanently refuses the governance core as a
+target — the governor, the timelock, and the ruleset itself — so a zero-vote proposal can
+never reconfigure the system that created it.
 
 The propose-time hook is the core's one addition: a ruleset advertising
 `IProposalValidator` via ERC165 has `validateProposal(proposer, targets, values,
@@ -310,13 +346,34 @@ forge coverage --no-match-path "test/fork/*" --report summary
 Fork tests pin block 25,445,220 and default to a public archive RPC; set
 `MAINNET_RPC_URL` for a dedicated endpoint (also the name of the CI secret).
 
-## Gas benchmarks
+## Nexus vs. the live ENS governor
 
-`test/fork/GasBench.t.sol` runs an A/B benchmark on the same mainnet fork: the live ENS
-governor (real deployed bytecode, real token checkpoint history) vs GovernorNexus, both
-running identical payloads through the same helpers. Gas is the `gasleft()` delta around
-the single measured call, excluding setup/fixture cost. Reference numbers at block
-25,445,220 (regenerate with `forge test --match-contract GasBench -vv`):
+The live ENS governor is a 2021, OZ-v4, Bravo-style deployment with everything fixed at
+deploy time. `GovernorNexus` keeps its day-to-day surface — behavioral parity is proven
+on a mainnet fork against the live bytecode, with each deliberate divergence pinned by
+the fork suite — and adds on top of it:
+
+| | Live ENS governor (OZ v4, 2021) | GovernorNexus (OZ v5.6.1) |
+|---|---|---|
+| Counting / quorum config | Hard-coded at deploy | Pluggable per-type rulesets, swappable by governance |
+| Proposal types | One | Vote-governed registry — standard, optimistic, bond, … |
+| Re-voting | Reverts (`vote already cast`) | Replaces the standing vote |
+| Last-minute vote sniping | Unprotected | Anti-snipe extension — a failing→passing flip in the final 24h extends voting by 48h |
+| Proposal spam | Proposal threshold only | Threshold + per-proposer concurrency cap |
+| Optimistic path | — | Pass-unless-vetoed type with proposer/action allowlists |
+| Proposing without voting power | — | Bond ruleset — lock 1,000 ENS, slashed only under the ratified spam predicate |
+| Cancellation | Proposer only, before voting starts | Self-cancel while votable + permissionless cancel if the proposer drops below threshold |
+| Batch voting | — | `castVoteWithReasonAndParamsBatch`, all-or-nothing, single nonce spend |
+| Propose-time content validation | — | ERC165-detected `IProposalValidator` hook per type |
+
+### Gas benchmarks
+
+What the features above cost per operation: `test/fork/GasBench.t.sol` runs an A/B
+benchmark on the same mainnet fork — the live ENS governor (real deployed bytecode, real
+token checkpoint history) vs GovernorNexus, both running identical payloads through the
+same helpers. Gas is the `gasleft()` delta around the single measured call, excluding
+setup/fixture cost. Reference numbers at block 25,445,220 (regenerate with
+`forge test --match-contract GasBench -vv`):
 
 | op | live gov | GovernorNexus | delta | attribution |
 |---|---:|---:|---:|---|
