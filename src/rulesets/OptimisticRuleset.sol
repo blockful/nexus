@@ -3,9 +3,9 @@ pragma solidity 0.8.30;
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {IProposalValidator} from "./IProposalValidator.sol";
-import {IRuleset} from "./IRuleset.sol";
-import {RulesetCounting} from "./RulesetCounting.sol";
+import {IProposalValidator} from "../interfaces/IProposalValidator.sol";
+import {IRuleset} from "../interfaces/IRuleset.sol";
+import {RulesetCounting} from "../RulesetCounting.sol";
 
 /// @title OptimisticRuleset
 /// @notice Pass-by-default ruleset: no quorum, and a proposal succeeds unless the Against
@@ -91,7 +91,8 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
         address proposer,
         address[] calldata targets,
         uint256[] calldata values,
-        bytes[] calldata calldatas
+        bytes[] calldata calldatas,
+        bytes32
     ) external view onlyGovernor {
         if (targets.length != values.length || values.length != calldatas.length) {
             revert LengthMismatch();

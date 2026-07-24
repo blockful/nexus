@@ -7,12 +7,12 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {Box} from "./mocks/Box.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {Box} from "../mocks/Box.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
 
 /// @dev Full-lifecycle suite for GovernorNexus with real ruleset dispatch. Unlike the
 ///      registry/propose suites (which use a trivial harness fixture), this deploys plain
@@ -55,7 +55,7 @@ contract GovernorNexusLifecycleTest is Test {
         token = new MockENSToken();
         timelock = new TimelockController(TIMELOCK_DELAY, new address[](0), new address[](0), address(this));
 
-        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // Wiring: StandardRuleset.countVote is onlyGovernor and
         // quorumReached reads governor.proposalSnapshot, so the ruleset must be constructed
         // with the governor's address. The governor's constructor in turn needs the ruleset,
         // so we precompute the governor's CREATE address (next nonce + 1) and hand it to the
@@ -247,7 +247,7 @@ contract GovernorNexusLifecycleTest is Test {
         assertEq(uint8(_state(id)), uint8(IGovernor.ProposalState.Succeeded));
     }
 
-    // ─────────────────────── 3. Revote replaces (Nexus 2, D12/D15/D17) ───────────────────────
+    // ─────────────────────── 3. Revote replaces ───────────────────────
 
     /// @dev End-to-end proof that the outcome follows the *standing* votes: alice (50e18) carries
     ///      the proposal, then re-votes Against — at the deadline the proposal is Defeated, the
@@ -269,7 +269,7 @@ contract GovernorNexusLifecycleTest is Test {
         assertEq(uint8(_state(id)), uint8(IGovernor.ProposalState.Defeated));
     }
 
-    /// @dev D15: no new event — the core re-emits stock `VoteCast` on every cast, so an indexer's
+    /// @dev No new event — the core re-emits stock `VoteCast` on every cast, so an indexer's
     ///      rule is "latest VoteCast per (proposal, voter), in log order, is canonical".
     function test_revote_emitsVoteCastAgain() public {
         (uint256 id,,,,) = _proposeActive(1, "revote emits", 0);
@@ -281,7 +281,7 @@ contract GovernorNexusLifecycleTest is Test {
         governor.castVote(id, 0);
     }
 
-    /// @dev D17: the ruleset never reads the clock — the core's Active-state gate is what closes
+    /// @dev The ruleset never reads the clock — the core's Active-state gate is what closes
     ///      the re-vote window, exactly as it closes the first-vote window.
     function test_revote_afterDeadline_revertsInTheCore() public {
         (uint256 id,,,,) = _proposeActive(1, "revote too late", 0);
@@ -318,7 +318,7 @@ contract GovernorNexusLifecycleTest is Test {
         governor.castVoteBySig(id, 1, signer, ballotFor); // same signature, nonce already spent
     }
 
-    /// @dev The stale-pre-signed-ballot override (audit-panel Medium, D21). A voter signs a gasless
+    /// @dev The stale-pre-signed-ballot override. A voter signs a gasless
     ///      ballot and hands it to a relayer, but then changes their mind and votes directly. Under
     ///      mutable votes the last-applied cast wins, so without a defense the relayer could submit
     ///      the outstanding signature AFTERWARD to override the voter's direct vote. GovernorNexus
@@ -347,7 +347,7 @@ contract GovernorNexusLifecycleTest is Test {
         assertEq(against, 30e18, "the direct Against vote stands");
     }
 
-    /// @dev Accepted cost of the account-global nonce (D21, Variant 1): a direct vote on ONE
+    /// @dev Accepted cost of the account-global nonce: a direct vote on ONE
     ///      proposal also invalidates the voter's outstanding signed ballots on OTHER open
     ///      proposals, because OZ's vote nonce is per-account, not per-proposal. Deliberate
     ///      trade-off — per-proposal scoping would change the relayer's signing scheme.

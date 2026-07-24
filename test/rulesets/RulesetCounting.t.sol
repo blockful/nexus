@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
 
-import {RulesetCounting} from "../src/RulesetCounting.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
 
 /// @dev Concrete stand-in for the abstract base: the mutable-vote counting mechanics live
 ///      entirely in `RulesetCounting`, so a ruleset whose *rules* are stubs is enough to
@@ -45,9 +45,9 @@ contract CountingHarness is RulesetCounting {
     }
 }
 
-/// @dev A ruleset with a FOURTH option, standing in for Nexus 8's Bond ruleset (No+Slash).
+/// @dev A ruleset with a FOURTH option, standing in for the Bond ruleset (No+Slash).
 ///      The base must count it without a storage-layout change — otherwise "the counting layer
-///      every ruleset shares" (D13) is only true for the three-bucket rulesets.
+///      every ruleset shares" is only true for the three-bucket rulesets.
 contract FourOptionHarness is RulesetCounting {
     uint8 internal constant NO_AND_SLASH = 3;
 
@@ -79,7 +79,7 @@ contract FourOptionHarness is RulesetCounting {
     }
 }
 
-/// @dev Unit suite for the shared mutable-vote counting base (Nexus 2, D12–D14).
+/// @dev Unit suite for the shared mutable-vote counting base.
 ///      The governor is a plain address pranked as the caller — the base's only external
 ///      dependency is `onlyGovernor`, so no governor implementation is needed here.
 contract RulesetCountingTest is Test {
@@ -90,7 +90,7 @@ contract RulesetCountingTest is Test {
     uint256 internal constant PROPOSAL_ID = 1;
     uint256 internal constant OTHER_PROPOSAL_ID = 2;
 
-    /// @dev The receipt packs weight into `uint240` (D14); this is the first value that does not fit.
+    /// @dev The receipt packs weight into `uint240`; this is the first value that does not fit.
     uint256 internal constant WEIGHT_LIMIT = 1 << 240;
 
     CountingHarness internal counting;
@@ -147,7 +147,7 @@ contract RulesetCountingTest is Test {
         counting.countVote(PROPOSAL_ID, alice, FOR, 600e18, "");
     }
 
-    // ─────────────────────────── Re-vote: the 9 transitions (D12) ───────────────────────────
+    // ─────────────────────────── Re-vote: the 9 transitions ───────────────────────────
 
     /// @dev Every (from, to) support pair: the old bucket must be debited by the recorded
     ///      weight and the new bucket credited, leaving exactly one standing vote. The three
@@ -180,8 +180,8 @@ contract RulesetCountingTest is Test {
         assertEq(counted, 600e18, "countVote reports the standing vote, not a delta");
     }
 
-    /// @dev The debit side reads the *recorded* weight, the credit side the *passed* weight
-    ///      (D12). Under snapshot voting both are equal, but the accounting must not assume it.
+    /// @dev The debit side reads the *recorded* weight, the credit side the *passed* weight.
+    ///      Under snapshot voting both are equal, but the accounting must not assume it.
     function test_countVote_revote_withDifferentWeight_debitsRecordedCreditsPassed() public {
         _countVote(alice, FOR, 600e18);
         _countVote(alice, AGAINST, 250e18);
@@ -238,7 +238,7 @@ contract RulesetCountingTest is Test {
         assertEq(_bucketOf(PROPOSAL_ID, AGAINST), 600e18);
     }
 
-    // ─────────────────────────── Receipt width guard (D14 / DEV-1017) ───────────────────────────
+    // ─────────────────────────── Receipt width guard ───────────────────────────
 
     function test_countVote_acceptsMaxUint240Weight() public {
         uint256 counted = _countVote(alice, FOR, WEIGHT_LIMIT - 1);
@@ -261,7 +261,7 @@ contract RulesetCountingTest is Test {
     // ─────────────────────────── Per-support tally (frozen vector surface) ───────────────────────────
 
     /// @dev `tally(id, support)` is the accessor the frozen differential-vector ABI requires
-    ///      (spec v1 §4, `IStandardRulesetVector`). It reads the same buckets as `proposalVotes`,
+    ///      (`IStandardRulesetVector`). It reads the same buckets as `proposalVotes`,
     ///      one at a time, which is what the tally-conservation vectors iterate over.
     function test_tally_readsTheSameBucketsAsProposalVotes() public {
         _countVote(alice, AGAINST, 600e18);
@@ -282,7 +282,7 @@ contract RulesetCountingTest is Test {
         counting.tally(PROPOSAL_ID, 3);
     }
 
-    // ─────────────────────────── Unknown-id contract (Nexus 1 §4.5) ───────────────────────────
+    // ─────────────────────────── Unknown-id contract ───────────────────────────
 
     function test_views_unknownProposalId_neverRevert() public view {
         uint256 unknown = 999;
@@ -309,10 +309,10 @@ contract RulesetCountingTest is Test {
         assertEq(weight, 0);
     }
 
-    // ─────────────────────────── Extra support options (D13 — Bond, Nexus 8) ───────────────────────────
+    // ─────────────────────────── Extra support options (Bond) ───────────────────────────
 
     /// @dev The base must carry a ruleset that defines more than the three Bravo options: Bond
-    ///      (Nexus 8, frozen scope) adds No+Slash as support=3. A re-vote *into* the extra bucket
+    ///      adds No+Slash as support=3. A re-vote *into* the extra bucket
     ///      must conserve the tally exactly as the three-option case does.
     function test_extraSupportOption_countsAndConservesOnRevote() public {
         FourOptionHarness bond = new FourOptionHarness(governor);
@@ -340,7 +340,7 @@ contract RulesetCountingTest is Test {
 
     // ─────────────────────────── Tally conservation (fuzz) ───────────────────────────
 
-    /// @dev The milestone's headline property (D12): after an arbitrary re-vote sequence, each
+    /// @dev The headline conservation property: after an arbitrary re-vote sequence, each
     ///      bucket equals the sum of the weights of the voters whose *latest* vote points at it,
     ///      and the buckets together equal the total standing weight — never more (double count),
     ///      never less (lost debit).
@@ -398,7 +398,7 @@ contract RulesetCountingTest is Test {
         assertEq(weight, 600e18);
     }
 
-    /// @dev The F2 attack shape (D16): a tally that crosses a threshold, is re-voted back below
+    /// @dev The threshold-oscillation attack shape: a tally that crosses a threshold, is re-voted back below
     ///      it, and crosses again must be exactly reconstructible at every step — the tally layer
     ///      stays coherent even though the *crossing* is not a monotonic event.
     function test_tally_oscillatesAcrossAThresholdWithoutDrift() public {

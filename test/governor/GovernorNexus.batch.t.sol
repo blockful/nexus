@@ -4,11 +4,11 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {console2} from "forge-std/console2.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {Box} from "./mocks/Box.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {Box} from "../mocks/Box.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 
 /// @dev Batch voting suite for `castVoteWithReasonAndParamsBatch`. Extends the shared base:
 ///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter, so most weight

@@ -5,10 +5,10 @@ import {Test} from "forge-std/Test.sol";
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {IProposalValidator} from "../src/IProposalValidator.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {OptimisticRuleset} from "../src/OptimisticRuleset.sol";
-import {RulesetCounting} from "../src/RulesetCounting.sol";
+import {IProposalValidator} from "../../src/interfaces/IProposalValidator.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {OptimisticRuleset} from "../../src/rulesets/OptimisticRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
 
 /// @dev Isolated unit suite. The ruleset reads nothing from its governor (no quorum, no
 ///      snapshot, no token), so a plain address suffices as the `onlyGovernor` caller —
@@ -66,7 +66,7 @@ contract OptimisticRulesetTest is Test {
         internal
     {
         vm.prank(governor);
-        ruleset.validateProposal(proposer, targets, values, calldatas);
+        ruleset.validateProposal(proposer, targets, values, calldatas, bytes32(0));
     }
 
     // ─────────────────────────── Constructor ───────────────────────────
@@ -228,7 +228,7 @@ contract OptimisticRulesetTest is Test {
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _validArrays();
         vm.prank(stranger);
         vm.expectRevert(abi.encodeWithSelector(RulesetCounting.Unauthorized.selector, stranger));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     // ─────────────────────────── validateProposal: length check ───────────────────────────
@@ -240,7 +240,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(OptimisticRuleset.LengthMismatch.selector);
-        ruleset.validateProposal(alice, targets, shortValues, calldatas);
+        ruleset.validateProposal(alice, targets, shortValues, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnShorterCalldatas() public {
@@ -250,7 +250,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(OptimisticRuleset.LengthMismatch.selector);
-        ruleset.validateProposal(alice, targets, values, shortCalldatas);
+        ruleset.validateProposal(alice, targets, values, shortCalldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnShorterTargets() public {
@@ -260,7 +260,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(OptimisticRuleset.LengthMismatch.selector);
-        ruleset.validateProposal(alice, shortTargets, values, calldatas);
+        ruleset.validateProposal(alice, shortTargets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_lengthCheckRunsBeforeProposerCheck() public {
@@ -271,7 +271,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(OptimisticRuleset.LengthMismatch.selector);
-        ruleset.validateProposal(stranger, targets, shortValues, calldatas);
+        ruleset.validateProposal(stranger, targets, shortValues, calldatas, bytes32(0));
     }
 
     /// @dev Any asymmetric length triple reverts `LengthMismatch` — never an out-of-bounds
@@ -289,7 +289,7 @@ contract OptimisticRulesetTest is Test {
         vm.prank(governor);
         vm.expectRevert(OptimisticRuleset.LengthMismatch.selector);
         ruleset.validateProposal(
-            alice, new address[](targetsLength), new uint256[](valuesLength), new bytes[](calldatasLength)
+            alice, new address[](targetsLength), new uint256[](valuesLength), new bytes[](calldatasLength), bytes32(0)
         );
     }
 
@@ -301,7 +301,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ProposerNotAllowed.selector, alice));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsAfterProposerDisallowed() public {
@@ -315,7 +315,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ProposerNotAllowed.selector, alice));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     // ─────────────────────────── validateProposal: per-action rules ───────────────────────────
@@ -328,7 +328,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ValueNotAllowed.selector, 0));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnEmptyCalldata() public {
@@ -338,7 +338,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.SelectorMissing.selector, 0));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnCalldataShorterThanSelector() public {
@@ -348,7 +348,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.SelectorMissing.selector, 0));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnNonAllowlistedAction() public {
@@ -357,7 +357,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ActionNotAllowed.selector, target, SELECTOR));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_revertsOnAllowlistedSelectorAtDifferentTarget() public {
@@ -371,7 +371,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ActionNotAllowed.selector, otherTarget, SELECTOR));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     function test_validateProposal_reportsFailingIndexInMultiActionProposal() public {
@@ -389,7 +389,7 @@ contract OptimisticRulesetTest is Test {
 
         vm.prank(governor);
         vm.expectRevert(abi.encodeWithSelector(OptimisticRuleset.ValueNotAllowed.selector, 1));
-        ruleset.validateProposal(alice, targets, values, calldatas);
+        ruleset.validateProposal(alice, targets, values, calldatas, bytes32(0));
     }
 
     // ─────────────────────────── validateProposal: happy paths ───────────────────────────

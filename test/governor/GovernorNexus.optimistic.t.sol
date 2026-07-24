@@ -3,10 +3,10 @@ pragma solidity ^0.8.30;
 
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {OptimisticRuleset} from "../src/OptimisticRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {OptimisticRuleset} from "../../src/rulesets/OptimisticRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {Box} from "./mocks/Box.sol";
+import {Box} from "../mocks/Box.sol";
 
 /// @dev Integration suite for the optimistic type on a live GovernorNexus: the ruleset's
 ///      validation rules propagating through the propose-time gate, allowlist entries

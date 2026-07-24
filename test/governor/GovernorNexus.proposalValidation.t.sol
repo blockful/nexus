@@ -3,15 +3,15 @@ pragma solidity ^0.8.30;
 
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 import {
     AcceptingValidatorRuleset,
     GasBurnValidatorRuleset,
     PoisonedValidatorRuleset,
     ToggleableValidatorRuleset
-} from "./mocks/ValidatorRulesets.sol";
+} from "../mocks/ValidatorRulesets.sol";
 
 /// @dev Integration suite for the propose-time validation gate, using only mock validators —
 ///      the gate is a core feature independent of any production ruleset. Pins:
