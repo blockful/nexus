@@ -3,59 +3,77 @@
 Production implementation of **Governor Nexus** — blockful's modular security upgrade
 for ENS governance ([RFC](https://discuss.ens.domains/t/rfc-governor-nexus-modular-security-upgrade-for-ens-governance/21942)).
 
-`GovernorNexus` is a modular governor core: it replaces a stock governor's baked-in
-settings/counting/quorum with a vote-governed registry of proposal types, each dispatching
-vote-counting to a pluggable external `IRuleset`. On top of the core sit two behavioral
-mechanisms: **mutable votes** (casting again replaces your standing vote) and the
-**anti-snipe late-vote extension** (a proposal that flips from failing to passing inside
-the final 24h has its voting extended once, by 48h past the original deadline). Behavioral
-parity against the live deployed ENS governor is proven on a mainnet fork, both for the
-bootstrap ruleset's counting semantics and for the governor's day-to-day surface —
+Governor Nexus is a modular governance framework that modernizes the ENS Governor while
+preserving full compatibility with the existing Timelock contract. It combines security
+hardening, improved operational UX for delegates, and a ruleset architecture that lets
+different proposal classes follow different approval logic — reducing governance attack
+surface now while making future governance evolution safer and easier.
+
+In code terms: `GovernorNexus` replaces the stock governor's baked-in
+settings/counting/quorum with a vote-governed registry of proposal types, each
+dispatching vote-counting to a pluggable external `IRuleset`, and layers the security
+mechanisms on the core — **mutable votes**, the **anti-snipe late-vote extension**, a
+per-proposer **spam limit**, a hardened **cancellation policy**, **batch voting**.
+Behavioral parity against the live deployed ENS governor is proven on a mainnet fork;
 deliberate divergences are pinned as such by the fork suite.
 
 ## Architecture
 
+Governor Nexus uses a modular router architecture:
+
 ```mermaid
-flowchart LR
-    V(("Voter /<br/>Proposer")) -->|"propose · castVote"| G
+flowchart TD
+    U(("Users")) -->|"propose · castVote"| CORE["<b>Governor Nexus Core</b><br/>proposal lifecycle · type registry · timelock admin"]
+    CORE -->|"queue · execute"| TL["ENS Timelock"]
+    CORE <-->|"counting · quorum · success ·<br/>propose-time validation"| RS
 
-    subgraph G["GovernorNexus core"]
-        direction TB
-        R["Proposal-type registry<br/>append-only · vote-governed"]
-        X["anti-snipe extension · spam limit<br/>batch voting · cancellation policy"]
+    subgraph RS["Pluggable rulesets — one per proposal type"]
+        direction LR
+        S["Standard<br/>type 0 · live-ENS parity"] ~~~ O["Optimistic<br/>pass-unless-vetoed"] ~~~ B["Bond<br/>lock-to-propose"] ~~~ M["… future modules,<br/>added by governance"]
     end
-
-    R -->|"type 0 (default)"| S["StandardRuleset<br/>live-ENS parity"]
-    R -->|"type n"| O["OptimisticRuleset<br/>pass-unless-vetoed"]
-    R -->|"type m"| B["BondRuleset<br/>lock-to-propose"]
-
-    S -. "inherit" .-> C["RulesetCounting<br/>Bravo buckets · mutable votes"]
-    O -.-> C
-    B -.-> C
-
-    G -->|"queue · execute"| T["ENS Timelock"]
 ```
 
-The three rulesets shown are the production ones; the registry accepts any future
-`IRuleset` the DAO votes in. Quorum reads (`getPastVotes`/`getPastTotalSupply`) go from
-the ruleset to the ENS token.
+**Governor Nexus Core responsibilities:**
 
-`GovernorNexus` generalizes the single hard-coded configuration of a stock governor into
-a vote-governed, append-only registry of proposal types:
+- Owns the proposal lifecycle and the Timelock admin rights — the existing ENS Timelock
+  is kept as-is
+- Maintains the vote-governed, append-only proposal-type registry; every proposal is
+  pinned to exactly one type at creation, for its lifetime
+- Dispatches counting, quorum/success checks, and propose-time validation to the pinned
+  ruleset — the core never counts votes itself
+
+**Ruleset responsibilities:**
+
+- Define quorum, approval thresholds, and type-specific counting logic
+- Own the vote buckets and per-voter receipts — every ruleset inherits the
+  `RulesetCounting` base (Bravo buckets, mutable votes)
+- Stay individually swappable through governance: each ruleset is an immutable,
+  single-purpose contract; the DAO evolves by registering new types, never by mutating
+  live ones
+
+**Proposal types** shipped in this repo (others can be introduced later through
+governance):
+
+| Proposal type | Condition to propose | Approval | Quorum |
+|---|---|---|---|
+| Standard (type 0, default) | Voting power ≥ proposal threshold | Simple majority | Fractional, 1% of supply — live-ENS parity |
+| Optimistic | Allowlisted proposer + allowlisted actions | Passes unless Against reaches the veto threshold | None |
+| Bond | Lock `bondAmount` of ENS — no voting-power gate | Simple majority + spam-slash predicate on defeat | Fractional, 1% of supply |
+
+Registry mechanics, precisely:
 
 - **Each type pins an external `IRuleset`** plus its own voting delay, voting period, and
   proposal threshold. Once registered, a type's ruleset and parameters never change — only
   its `active` flag and the registry's default pointer can move, both gated behind
   governance.
-- **Every proposal is pinned to exactly one type at creation, for its lifetime.** The pin
-  is looked up transiently (EIP-1153) only while the stock proposal-creation body runs, so
-  the type-scoped delay/period never leak into externally observable state — safe because
-  that body makes no state-committing external call while the context is set (its only
-  external dispatch, the duplicate-proposal check, reverts unconditionally), so no
-  reentrant reader can ever observe the typed values.
-- **Counting is never done by the core** — `countVote`, `quorumReached`, `voteSucceeded`,
-  and `hasVoted` all dispatch to the proposal's pinned ruleset, an immutable,
-  single-purpose contract the DAO can swap per type without touching the governor.
+- **The per-proposal type pin is read transiently** (EIP-1153) only while the stock
+  proposal-creation body runs, so the type-scoped delay/period never leak into externally
+  observable state — safe because that body makes no state-committing external call while
+  the context is set (its only external dispatch, the duplicate-proposal check, reverts
+  unconditionally), so no reentrant reader can ever observe the typed values.
+- **Every counting read dispatches to the pinned ruleset** — `countVote`, `quorumReached`,
+  `voteSucceeded`, and `hasVoted` — so the DAO swaps counting per type without ever
+  touching the governor.
 - **`StandardRuleset` is the bootstrap ruleset** (registered as type 0, the initial
   default): it reproduces the live ENS governor's Bravo-style vote buckets
   (Against/For/Abstain) and fractional quorum exactly.
@@ -349,22 +367,24 @@ Fork tests pin block 25,445,220 and default to a public archive RPC; set
 ## Nexus vs. the live ENS governor
 
 The live ENS governor is a 2021, OZ-v4, Bravo-style deployment with everything fixed at
-deploy time. `GovernorNexus` keeps its day-to-day surface — behavioral parity is proven
-on a mainnet fork against the live bytecode, with each deliberate divergence pinned by
-the fork suite — and adds on top of it:
+deploy time; Governor Nexus rebuilds it on OZ v5.6.1 while keeping its day-to-day
+surface — behavioral parity is proven on a mainnet fork against the live bytecode, with
+each deliberate divergence pinned by the fork suite. What changes is the risk profile:
+the RFC's security assessment under the [Anticapture](https://anticapture.com/ens)
+framework places the current setup at **Stage 0**, and the mechanisms below move ENS
+governance to **Stage 1**.
 
-| | Live ENS governor (OZ v4, 2021) | GovernorNexus (OZ v5.6.1) |
+| Exposure in the live governor | Severity | Governor Nexus answer |
 |---|---|---|
-| Counting / quorum config | Hard-coded at deploy | Pluggable per-type rulesets, swappable by governance |
-| Proposal types | One | Vote-governed registry — standard, optimistic, bond, … |
-| Re-voting | Reverts (`vote already cast`) | Replaces the standing vote |
-| Last-minute vote sniping | Unprotected | Anti-snipe extension — a failing→passing flip in the final 24h extends voting by 48h |
-| Proposal spam | Proposal threshold only | Threshold + per-proposer concurrency cap |
-| Optimistic path | — | Pass-unless-vetoed type with proposer/action allowlists |
-| Proposing without voting power | — | Bond ruleset — lock 1,000 ENS, slashed only under the ratified spam predicate |
-| Cancellation | Proposer only, before voting starts | Self-cancel while votable + permissionless cancel if the proposer drops below threshold |
-| Batch voting | — | `castVoteWithReasonAndParamsBatch`, all-or-nothing, single nonce spend |
-| Propose-time content validation | — | ERC165-detected `IProposalValidator` hook per type |
+| Proposal spam can force a war of attrition | **Critical** | Per-proposer cap on concurrently live proposals — deploys at 2, governance-settable |
+| Insufficient voting delay — the pre-vote coordination window is one block | **Critical** | Voting delay is a per-type registry parameter; the migration raises it by governance, with no code change |
+| No continuous threshold enforcement — a proposer can dump their tokens right after submitting | **Critical** | A proposal whose proposer drops below threshold becomes cancellable by anyone while still votable |
+| Vote immutability — no correction path if a voting interface is compromised | **Medium** | Mutable votes: casting again replaces the standing vote |
+| No late-vote extension — last-minute flips can pass without response time | **Medium** | Anti-snipe extension: a failing→passing flip in the final 24h extends voting by 48h |
+| Routine operations require a full governance vote | **Low** | Optimistic pass-unless-vetoed type, gated by proposer/action allowlists |
+| Uniform approval thresholds for every proposal class | **Low** | Per-type thresholds and quorum via the ruleset registry |
+| High operational friction for delegates under proposal load | QoL | Batch voting — many proposals, one transaction, one nonce spend |
+| Proposing requires 100k ENS of voting power, full stop | QoL | Bond ruleset — lock 1,000 ENS instead, slashed only under the DAO-ratified spam predicate |
 
 ### Gas benchmarks
 
