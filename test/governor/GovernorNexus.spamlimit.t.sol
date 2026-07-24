@@ -8,7 +8,7 @@ import {GovernorNexus} from "../../src/GovernorNexus.sol";
 import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {RevertingViewsRuleset} from "../mocks/MaliciousRulesets.sol";
+import {RevertingViewsRuleset, StatefulPoisonRuleset} from "../mocks/MaliciousRulesets.sol";
 
 /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals, lazily pruned
 ///      at propose time. `bob`/`carol` are the spam subjects so `alice` stays free for
@@ -304,6 +304,46 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         assertEq(governor.activeProposalCount(bob), 0); // the view is poison-proof too
         _proposeAs(bob, "after poison 1");
         _proposeAs(bob, "after poison 2"); // full cap available again
+        assertEq(governor.activeProposalCount(bob), 2);
+    }
+
+    /// @dev Containment through the late-flip path the unconditional mock cannot reach: a ruleset
+    ///      that behaves while voting is open (so a final-window cast arms `FailingObserved`) and
+    ///      only reverts after the deadline. Pre-fix, `_isLive` read the OVERRIDDEN
+    ///      `proposalDeadline`, whose `FailingObserved` branch calls `_wouldPass` → the poisoned
+    ///      ruleset → revert, bricking the proposer's prune (and every future propose). The probe
+    ///      must instead settle liveness on the original deadline + late-flip stage alone.
+    function test_statefulPoisonedRuleset_afterFailingObserved_doesNotBrickPropose() public {
+        StatefulPoisonRuleset poison = new StatefulPoisonRuleset(address(governor));
+        uint8 badType = uint8(governor.typeCount());
+        _executeSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (IRuleset(poison), VOTING_DELAY, VOTING_PERIOD, 0)),
+            "register stateful-poison ruleset"
+        );
+
+        (address[] memory targets, uint256[] memory values, bytes[] memory calldatas,) = _args("stateful poison");
+        vm.prank(bob);
+        uint256 id = governor.proposeWithType(targets, values, calldatas, "stateful poison", badType);
+
+        // Cast inside the final window while the ruleset still behaves (views return failing):
+        // this arms the late-flip `FailingObserved` stage — the state the unconditional mock
+        // can never produce.
+        vm.roll(governor.proposalDeadline(id) - 1);
+        vm.prank(alice);
+        governor.castVote(id, 1);
+
+        // Past the conservative window (originalDeadline + extensionDuration), then poison it.
+        vm.roll(governor.proposalDeadline(id) + EXTENSION_DURATION + 1);
+        poison.poison();
+
+        // Containment boundary: state() legitimately reaches the ruleset post-deadline, so it
+        // still reverts — but the liveness probe must not, so propose stays available.
+        vm.expectRevert(StatefulPoisonRuleset.ViewPoisoned.selector);
+        governor.state(id);
+
+        assertEq(governor.activeProposalCount(bob), 0); // probe is ruleset-free: dead id, no revert
+        _proposeAs(bob, "after stateful poison 1");
+        _proposeAs(bob, "after stateful poison 2"); // full cap available again
         assertEq(governor.activeProposalCount(bob), 2);
     }
 

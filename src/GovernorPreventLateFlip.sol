@@ -100,6 +100,20 @@ abstract contract GovernorPreventLateFlip is Governor {
         _observeLateFlip(proposalId);
     }
 
+    /// @dev The ORIGINAL deadline from core storage, before any late-flip extension — never
+    ///      reaches a ruleset. Callers that must stay ruleset-free (e.g. a governor's liveness
+    ///      probe) read this instead of {proposalDeadline}, whose post-deadline branch
+    ///      dispatches to `_wouldPass` and therefore to the pinned ruleset.
+    function _originalDeadline(uint256 proposalId) internal view returns (uint256) {
+        return super.proposalDeadline(proposalId);
+    }
+
+    /// @dev A proposal's late-flip stage from core storage. Lets ruleset-free callers bound the
+    ///      real (possibly extended) deadline without evaluating `_wouldPass`.
+    function _lateFlipStageOf(uint256 proposalId) internal view returns (LateFlipStage) {
+        return _lateFlipStage[proposalId];
+    }
+
     /// @inheritdoc Governor
     /// @dev Extended lazily past the original deadline: the answer comes from the
     ///      materialized stage or, until the first extension-period cast sets it, a live read.

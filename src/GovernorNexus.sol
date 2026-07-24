@@ -367,14 +367,25 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         }
     }
 
-    /// @dev Liveness probe that must never reach a ruleset: past the deadline it settles on
-    ///      `proposalDeadline` alone; `state()` is consulted only within the deadline, where
-    ///      it resolves purely from core storage. Keeps a ruleset with poisoned views from
-    ///      bricking its proposer's next propose.
+    /// @dev Liveness probe that is deliberately ruleset-free, so a ruleset with poisoned views
+    ///      can never brick its proposer's next propose (the prune loop runs on every propose).
+    ///      Within the original deadline it reads `state()`, which resolves purely from core
+    ///      storage (Pending/Active) — the early return keeps `state()` from ever being consulted
+    ///      past the deadline, where it would dispatch to a ruleset. Past the original deadline it
+    ///      decides from the late-flip stage alone (also core storage): `None` can never extend,
+    ///      so the id is dead; otherwise it may still sit inside its one-shot extension window,
+    ///      treated as live until `originalDeadline + extensionDuration` and dead beyond. This is
+    ///      conservative for a `FailingObserved` id that ends up failing — it holds the slot up to
+    ///      `extensionDuration` longer than strictly needed — because its true deadline depends on
+    ///      `_wouldPass`, which needs a ruleset the probe must not call.
     function _isLive(uint256 proposalId) private view returns (bool) {
-        if (proposalDeadline(proposalId) < clock()) return false;
-        ProposalState s = state(proposalId);
-        return s == ProposalState.Pending || s == ProposalState.Active;
+        uint256 originalDeadline = _originalDeadline(proposalId);
+        if (clock() <= originalDeadline) {
+            ProposalState s = state(proposalId);
+            return s == ProposalState.Pending || s == ProposalState.Active;
+        }
+        if (_lateFlipStageOf(proposalId) == LateFlipStage.None) return false;
+        return clock() <= originalDeadline + extensionDuration;
     }
 
     /// @notice Current per-proposer live-proposal cap.
