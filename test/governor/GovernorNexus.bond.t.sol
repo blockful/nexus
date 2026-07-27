@@ -8,10 +8,10 @@ import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
 import {BondRulesetTestBase} from "../rulesets/BondRulesetTestBase.sol";
 
 /// @dev Integration suite for `resolveBond` against the real `GovernorNexus` + timelock —
-///      the spam-slash predicate (a defeated proposal forfeits its bond only when slash-weight
-///      is the strict plurality over both For and Against) and the terminal-states-only guard,
-///      each exercised end to end through the actual propose → vote → queue/execute/cancel
-///      lifecycle rather than a mocked governor.
+///      the ratified spam-slash predicate (EP 5.15 verbatim: combined rejections strictly
+///      beat For AND slash-weight strictly beats plain Against) and the terminal-states-only
+///      guard, each exercised end to end through the actual propose → vote → queue/execute/
+///      cancel lifecycle rather than a mocked governor.
 contract GovernorNexusBondTest is BondRulesetTestBase {
     function test_endToEnd_permissionlessPropose_zeroVP() public {
         (uint256 id,,,,) = _proposeBonded("bonded");
@@ -65,7 +65,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
     }
 
     function test_resolve_defeated_plainNoMajority_refunds() public {
-        // Against 500k > Slash 100k → slash is not the plurality → refund despite defeat
+        // Against 500k > Slash 100k → slash does not beat plain rejection → refund despite defeat
         address noVoter = makeAddr("noVoter");
         address slasher = makeAddr("slasher");
         _fund(noVoter, 500_000e18);
@@ -105,7 +105,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
     }
 
     /// @dev The true quorum-fail carve-out: a tiny For vote below quorum defeats the
-    ///      proposal, but slash is not the strict plurality over For, so it refunds.
+    ///      proposal, but the (empty) rejections don't beat For, so it refunds.
     function test_resolve_defeated_quorumFail_forVotesLead_refunds() public {
         address forVoter = makeAddr("forVoter");
         _fund(forVoter, 1e18); // way below 1% quorum of ~2M supply
@@ -118,7 +118,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated)); // quorum missed
         uint256 before = token.balanceOf(bob);
         bondRuleset.resolveBond(id);
-        assertEq(token.balanceOf(bob), before + BOND_AMOUNT); // slash 0 ≯ For → refund
+        assertEq(token.balanceOf(bob), before + BOND_AMOUNT); // rejections 0 ≯ For → refund
     }
 
     /// @dev Legitimate proposal that missed quorum with real support: For outweighs a smaller
@@ -142,11 +142,12 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
     }
 
-    // ─────────────────── Strict-plurality predicate tests ───────────────────
+    // ─────────────── Ratified predicate (EP 5.15) boundary tests ───────────────
 
     /// @dev A proposer defending with real voting weight via plain Against is legitimate
-    ///      defense (identical capital cost to defending via For, and any per-address
-    ///      exclusion is sybil-bypassable): Against 300k > Slash 200k → refund.
+    ///      defense — the ratified rule reads raw buckets, and the per-address exclusion an
+    ///      earlier revision layered on top was sybil-bypassable anyway: Against 300k >
+    ///      Slash 200k kills the second clause → refund.
     function test_resolve_proposerAgainstDefense_realWeight_refunds() public {
         address slasher = makeAddr("slasher");
         _fund(slasher, 200_000e18);
@@ -212,7 +213,8 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
     }
 
-    /// @dev Plurality must be STRICT: slash tied with For refunds.
+    /// @dev "Rejected" must be STRICT (EP 5.15: "rejections bigger than approvals"): with no
+    ///      Against votes, slash tied with For means rejections tied with For → refund.
     function test_resolve_tieSlashFor_refunds() public {
         address forVoter = makeAddr("forVoter");
         address slasher = makeAddr("slasher");
@@ -234,7 +236,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
     }
 
-    /// @dev Plurality must be STRICT: slash tied with Against refunds.
+    /// @dev The penalty clause must be STRICT: slash tied with Against refunds.
     function test_resolve_tieSlashAgainst_refunds() public {
         address noVoter = makeAddr("noVoter");
         address slasher = makeAddr("slasher");
@@ -253,6 +255,96 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         uint256 before = token.balanceOf(bob);
         bondRuleset.resolveBond(id);
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+    }
+
+    /// @dev EP 5.15 counts REJECTIONS, not the slash bucket alone, against For: slash tied
+    ///      with For still forfeits when plain Against pushes the combined rejections over.
+    ///      (F=100k, A=50k, S=100k → rejections 150k > 100k ∧ slash 100k > 50k.)
+    function test_resolve_tieSlashFor_withAgainst_slashes() public {
+        address forVoter = makeAddr("forVoter");
+        address noVoter = makeAddr("noVoter");
+        address slasher = makeAddr("slasher");
+        _fund(forVoter, 100_000e18);
+        _fund(noVoter, 50_000e18);
+        _fund(slasher, 100_000e18);
+        vm.roll(block.number + 1);
+        (uint256 id,,,,) = _proposeBonded("tie slash-for, against present");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Abstain));
+        vm.prank(forVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.prank(noVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Against));
+        vm.prank(slasher);
+        governor.castVote(id, uint8(BondRuleset.VoteType.AgainstAndSlash));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated));
+
+        uint256 before = token.balanceOf(address(timelock));
+        vm.expectEmit(true, false, false, true);
+        emit BondRuleset.BondSlashed(id, BOND_AMOUNT, BondRuleset.SlashReason.SlashVote);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(address(timelock)), before + BOND_AMOUNT);
+    }
+
+    /// @dev Rejections exactly tied with For never slash, even with slash leading Against:
+    ///      the defeat clause is strict. (F=100k, A=30k, S=70k → rejections 100k ≯ 100k.)
+    function test_resolve_tieRejectionsFor_slashLeadsAgainst_refunds() public {
+        address forVoter = makeAddr("forVoter");
+        address noVoter = makeAddr("noVoter");
+        address slasher = makeAddr("slasher");
+        _fund(forVoter, 100_000e18);
+        _fund(noVoter, 30_000e18);
+        _fund(slasher, 70_000e18);
+        vm.roll(block.number + 1);
+        (uint256 id,,,,) = _proposeBonded("rejections tie for");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Abstain));
+        vm.prank(forVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.prank(noVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Against));
+        vm.prank(slasher);
+        governor.castVote(id, uint8(BondRuleset.VoteType.AgainstAndSlash));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated)); // tie ≠ success
+
+        uint256 before = token.balanceOf(bob);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+    }
+
+    /// @dev The ratified rule forfeits when the proposal is rejected and slash leads plain
+    ///      Against, even though slash alone does not beat For. (F=100k, A=60k, S=70k →
+    ///      rejections 130k > 100k ∧ slash 70k > 60k.)
+    function test_resolve_rejectedSlashLeadsAgainst_slashBelowFor_slashes() public {
+        address forVoter = makeAddr("forVoter");
+        address noVoter = makeAddr("noVoter");
+        address slasher = makeAddr("slasher");
+        _fund(forVoter, 100_000e18);
+        _fund(noVoter, 60_000e18);
+        _fund(slasher, 70_000e18);
+        vm.roll(block.number + 1);
+        (uint256 id,,,,) = _proposeBonded("rejected, slash leads against");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Abstain));
+        vm.prank(forVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.prank(noVoter);
+        governor.castVote(id, uint8(BondRuleset.VoteType.Against));
+        vm.prank(slasher);
+        governor.castVote(id, uint8(BondRuleset.VoteType.AgainstAndSlash));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Defeated));
+
+        uint256 before = token.balanceOf(address(timelock));
+        vm.expectEmit(true, false, false, true);
+        emit BondRuleset.BondSlashed(id, BOND_AMOUNT, BondRuleset.SlashReason.SlashVote);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(address(timelock)), before + BOND_AMOUNT);
     }
 
     /// @dev Slash strictly above BOTH expressive buckets → forfeit.
@@ -283,8 +375,8 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(address(timelock)), before + BOND_AMOUNT);
     }
 
-    /// @dev ACCEPTED RESIDUAL (see README): at zero turnout a single wei of slash weight is
-    ///      the strict plurality and confiscates. The defense is attracting any single vote in
+    /// @dev ACCEPTED RESIDUAL (see README): at zero turnout a single wei of slash weight
+    ///      satisfies both clauses and confiscates. The defense is attracting any single vote in
     ///      either expressive bucket; a participation floor was deliberately rejected so a
     ///      sybil spam wave can be slashed proposal-by-proposal without gathering quorum each time.
     function test_resolve_zeroTurnout_oneWeiSlash_slashes_acceptedResidual() public {

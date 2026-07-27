@@ -229,14 +229,15 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         return (treasury, SlashReason.ActiveSelfCancel, true);
     }
 
-    /// @dev Slash predicate: confiscation fires only when slash-weight is the STRICT plurality
-    ///      among the three expressive buckets — it must outweigh support (For) and plain
-    ///      rejection (Against); either tie refunds. Raw tallies, no per-address scrubbing.
+    /// @dev Slash predicate — the rule the DAO ratified on Snapshot (EP 5.15), applied
+    ///      verbatim on raw tallies: combined rejections strictly beat support AND
+    ///      slash-weight strictly beats plain rejection. Either tie refunds. No per-address
+    ///      scrubbing.
     function _slashVoted(uint256 proposalId) private view returns (bool) {
+        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
+        uint256 againstVotes = tally(proposalId, uint8(VoteType.Against));
         uint256 slashVotes = tally(proposalId, uint8(VoteType.AgainstAndSlash));
-        return
-            slashVotes > tally(proposalId, uint8(VoteType.For))
-                && slashVotes > tally(proposalId, uint8(VoteType.Against));
+        return againstVotes + slashVotes > forVotes && slashVotes > againstVotes;
     }
 
     /// @dev One-shot settle: flag first, single transfer after (CEI).
