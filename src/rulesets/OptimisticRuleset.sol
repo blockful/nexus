@@ -31,6 +31,9 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     /// @notice Governance executor that owns the allowlist setters. Must be the address
     ///         governance executions come from (the timelock), NOT the governor —
     ///         restricting to the governor would make the setters unreachable.
+    /// @dev Immutable, no successor path: if the DAO ever migrates executors, this ruleset's
+    ///      allowlists freeze as-is — the migration is deploying a fresh ruleset bound to the
+    ///      new executor and re-registering the type (the D7 re-pricing path).
     address public immutable admin;
 
     /// @notice Absolute Against weight at which a proposal is defeated.
