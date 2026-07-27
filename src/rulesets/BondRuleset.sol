@@ -179,41 +179,32 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
         if (bond.proposer == address(0)) revert NoBond(proposalId);
         if (bond.settled) revert BondAlreadySettled(proposalId);
 
-        (address to, SlashReason reason, bool slashed) = _bondResolution(proposalId, bond.proposer);
-        _settle(proposalId, bond, to, reason, slashed);
+        _settle(proposalId, bond, _bondResolution(proposalId));
     }
 
-    /// @dev Maps a terminal proposal state to the bond's destination, reason, and slash flag.
-    ///      Non-terminal states revert, so a refund can never front-run the council's veto window.
-    function _bondResolution(uint256 proposalId, address proposer)
-        private
-        view
-        returns (address to, SlashReason reason, bool slashed)
-    {
+    /// @dev Maps a terminal proposal state to the bond's resolution. `None` refunds the
+    ///      proposer; every other reason forfeits to the treasury — destination and event are
+    ///      derived in `_settle`, so no contradictory (reason, destination) pair is
+    ///      representable. Non-terminal states revert, so a refund can never front-run the
+    ///      council's veto window.
+    function _bondResolution(uint256 proposalId) private view returns (SlashReason) {
         IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
-        if (state == IGovernor.ProposalState.Executed) return (proposer, SlashReason.None, false);
+        if (state == IGovernor.ProposalState.Executed) return SlashReason.None;
         if (state == IGovernor.ProposalState.Defeated) {
-            if (_slashVoted(proposalId)) return (treasury, SlashReason.SlashVote, true);
-            return (proposer, SlashReason.None, false);
+            return _slashVoted(proposalId) ? SlashReason.SlashVote : SlashReason.None;
         }
-        if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId, proposer);
+        if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId);
         revert BondNotResolvable(proposalId, state);
     }
 
     /// @dev Cancel partition on the recorded cancel timepoint: a self-cancel while still Pending
     ///      (`0 < canceledAt <= snapshot`) refunds; a council veto (no governor-path timepoint,
     ///      `canceledAt == 0`) or a self-cancel after voting opened forfeits.
-    function _canceledBondResolution(uint256 proposalId, address proposer)
-        private
-        view
-        returns (address to, SlashReason reason, bool slashed)
-    {
+    function _canceledBondResolution(uint256 proposalId) private view returns (SlashReason) {
         uint48 canceledAt = IBondGovernor(governor).proposalCanceledAt(proposalId);
-        if (canceledAt == 0) return (treasury, SlashReason.TimelockVeto, true);
-        if (canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) {
-            return (proposer, SlashReason.None, false);
-        }
-        return (treasury, SlashReason.ActiveSelfCancel, true);
+        if (canceledAt == 0) return SlashReason.TimelockVeto;
+        if (canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) return SlashReason.None;
+        return SlashReason.ActiveSelfCancel;
     }
 
     /// @dev Slash predicate — the rule the DAO ratified on Snapshot (EP 5.15), applied
@@ -227,10 +218,13 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
         return againstVotes + slashVotes > forVotes && slashVotes > againstVotes;
     }
 
-    /// @dev One-shot settle: flag first, single transfer after (CEI).
-    function _settle(uint256 proposalId, Bond storage bond, address to, SlashReason reason, bool slashed) private {
+    /// @dev One-shot settle: flag first, single transfer after (CEI). Destination and event
+    ///      derive from the reason alone — `None` refunds the proposer, anything else
+    ///      forfeits to the treasury.
+    function _settle(uint256 proposalId, Bond storage bond, SlashReason reason) private {
         bond.settled = true;
-        IERC20(address(token)).safeTransfer(to, bondAmount);
+        bool slashed = reason != SlashReason.None;
+        IERC20(address(token)).safeTransfer(slashed ? treasury : bond.proposer, bondAmount);
         if (slashed) emit BondSlashed(proposalId, bondAmount, reason);
         else emit BondRefunded(proposalId, bond.proposer, bondAmount);
     }
