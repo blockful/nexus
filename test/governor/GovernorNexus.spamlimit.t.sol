@@ -96,6 +96,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     function test_canceledProposal_freesSlot_sameBlock() public {
         _proposeAs(bob, "p1");
         _proposeAs(bob, "p2");
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         // concurrency cap, not a rate limit: cancel-then-repropose succeeds in the same block
         _cancelAs(bob, "p1");
         uint256 id3 = _proposeAs(bob, "p3");
@@ -261,6 +262,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas,) = _args("p4");
         governor.propose(targets, values, calldatas, "p4");
 
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         _cancelAs(bob, "p3");
         uint256 id5 = _proposeAs(bob, "p5");
         assertEq(uint8(governor.state(id5)), uint8(IGovernor.ProposalState.Pending));
@@ -276,6 +278,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         _proposeAs(bob, "p1");
         _proposeAs(bob, "p2");
         assertEq(governor.activeProposalCount(bob), 2);
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         // cancel without any propose (no prune runs): the view must filter the dead id
         _cancelAs(bob, "p2");
         assertEq(governor.activeProposalCount(bob), 1);

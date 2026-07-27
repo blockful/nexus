@@ -103,6 +103,23 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         );
     }
 
+    function test_constructor_revertsOnZeroVotingDelay() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
+        vm.expectRevert(GovernorNexus.InvalidVotingDelay.selector);
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            rs,
+            0,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
     function test_constructor_revertsOnNonRulesetInterface() public {
         Mock165 notRuleset = new Mock165();
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.RulesetInterfaceUnsupported.selector, address(notRuleset)));
@@ -188,6 +205,15 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             abi.encodeCall(GovernorNexus.registerType, (rs, VOTING_DELAY, uint32(0), uint256(0))), "zero period"
         );
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
+        governor.execute(t, v, c, h);
+    }
+
+    function test_registerType_revertsOnZeroVotingDelay() public {
+        StandardRuleset rs = _newRuleset();
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _prepareSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (rs, uint48(0), VOTING_PERIOD, uint256(0))), "zero delay"
+        );
+        vm.expectRevert(GovernorNexus.InvalidVotingDelay.selector);
         governor.execute(t, v, c, h);
     }
 

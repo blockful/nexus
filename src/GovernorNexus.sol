@@ -96,6 +96,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     error RulesetGovernorMismatch(address ruleset, address boundGovernor);
     /// @notice `votingPeriod` is zero, which would open a proposal with no voting window.
     error InvalidVotingPeriod();
+    /// @notice `votingDelay` is zero, which would put the snapshot in the propose block
+    ///         (flash-loanable voting power) and erase the pre-vote cancel window.
+    error InvalidVotingDelay();
     /// @notice `typeId` has never been registered (`typeId >= typeCount`).
     error NonexistentType(uint8 typeId);
     /// @notice `typeId` is the current default and cannot be deactivated.
@@ -218,6 +221,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         }
         address boundGovernor = ruleset.governor();
         if (boundGovernor != address(this)) revert RulesetGovernorMismatch(address(ruleset), boundGovernor);
+        if (votingDelay_ == 0) revert InvalidVotingDelay();
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
         // Enforces GovernorPreventLateFlip's integration requirement at type registration.
         if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
@@ -589,17 +593,25 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     // ─────────────────────────── Cancel policy ───────────────────────────
 
-    /// @dev Cancel authorization: only while the proposal is Pending or Active — by the
-    ///      proposer, or by anyone when the pinned type's `proposalThreshold` is nonzero
-    ///      and the proposer's prior-block votes fall below it.
+    /// @dev Cancel authorization: only while the proposal is Pending or Active, and never in
+    ///      the propose block — by the proposer, or by anyone when the pinned type's
+    ///      `proposalThreshold` is nonzero and the proposer's prior-block votes fall below it.
+    ///      The propose-block bar makes the atomic propose→cancel→settle round-trip (which
+    ///      would flash-borrow away a proposal bond's capital cost) unrepresentable, and keeps
+    ///      a depth-1 reorg from changing a cancel's economic outcome.
     function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
         ProposalState s = state(proposalId);
         if (s != ProposalState.Pending && s != ProposalState.Active) return false;
 
+        // snapshot − delay = the propose block; both operands come from core storage, so the
+        // probe stays ruleset-free. `state()` above already rejected nonexistent ids.
+        TypeConfig storage config = _types[proposalType(proposalId)];
+        if (clock() == proposalSnapshot(proposalId) - config.votingDelay) return false;
+
         address proposer = proposalProposer(proposalId);
         if (caller == proposer) return true;
 
-        uint256 votesThreshold = _types[proposalType(proposalId)].proposalThreshold;
+        uint256 votesThreshold = config.proposalThreshold;
         return votesThreshold > 0 && getVotes(proposer, clock() - 1) < votesThreshold;
     }
 

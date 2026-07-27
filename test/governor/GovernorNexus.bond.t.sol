@@ -459,11 +459,35 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         bytes32 h;
         uint256 id;
         (id, t, v, c, h) = _proposeBonded("pending cancel");
+        vm.roll(block.number + 1); // clock == snapshot: still Pending, past the propose block
         vm.prank(bob);
-        governor.cancel(t, v, c, h); // still Pending
+        governor.cancel(t, v, c, h); // canceledAt == snapshot → the Pending-refund boundary
         uint256 before = token.balanceOf(bob);
         bondRuleset.resolveBond(id);
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+    }
+
+    /// @dev LEAD-10 pin: the atomic propose→cancel(→resolve) round-trip — which would let a
+    ///      flash-borrowed bond enter and leave custody inside one transaction — is denied at
+    ///      the cancel step, so the bond provably survives the propose block in custody.
+    function test_cancel_sameBlockAsPropose_denied_bondStaysLocked() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("atomic round-trip");
+
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorUnableToCancel.selector, id, bob));
+        governor.cancel(t, v, c, h);
+
+        (,, bool settled) = bondRuleset.bondOf(id);
+        assertFalse(settled);
+        vm.expectRevert(
+            abi.encodeWithSelector(BondRuleset.BondNotResolvable.selector, id, IGovernor.ProposalState.Pending)
+        );
+        bondRuleset.resolveBond(id);
     }
 
     function test_cancel_active_forfeitsInFull() public {
