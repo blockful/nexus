@@ -150,6 +150,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
+        emit DefaultTypeSet(0); // genesis default, so event-sourcing needs no special case
         _setMaxActiveProposals(maxActiveProposals_);
     }
 
@@ -341,8 +342,15 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
         TypeConfig storage config = _types[typeId];
         if (config.hasProposalValidation) {
+            // The governor derives the canonical id; validators consume it, never re-derive.
             IProposalValidator(address(config.ruleset))
-                .validateProposal(proposer, targets, values, calldatas, keccak256(bytes(description)));
+                .validateProposal(
+                    hashProposal(targets, values, calldatas, keccak256(bytes(description))),
+                    proposer,
+                    targets,
+                    values,
+                    calldatas
+                );
         }
 
         _typeContext = uint16(typeId) + 1;

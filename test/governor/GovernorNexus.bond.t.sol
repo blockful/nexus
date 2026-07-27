@@ -21,6 +21,16 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(amount, BOND_AMOUNT);
     }
 
+    /// @dev The bond keys on the id the GOVERNOR computed (passed through
+    ///      `IProposalValidator.validateProposal`), never a ruleset-side re-derivation —
+    ///      pinned by matching the bond record against `hashProposal` for the same content.
+    function test_bondKeyedByGovernorCanonicalId() public {
+        (uint256 id, address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _proposeBonded("canonical");
+        assertEq(id, governor.hashProposal(t, v, c, h));
+        (address proposer,,) = bondRuleset.bondOf(governor.hashProposal(t, v, c, h));
+        assertEq(proposer, bob);
+    }
+
     function test_resolve_executed_refunds() public {
         // alice (2M ENS) already funded by base fixture
         address[] memory t;

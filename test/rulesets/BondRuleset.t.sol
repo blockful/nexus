@@ -182,7 +182,7 @@ contract BondRulesetTest is Test {
         vm.expectEmit(true, true, false, true);
         emit BondRuleset.BondLocked(_canonicalId(t, v, c, h), bob, BOND);
         vm.prank(governorMock);
-        ruleset.validateProposal(bob, t, v, c, h);
+        ruleset.validateProposal(_canonicalId(t, v, c, h), bob, t, v, c);
 
         (address proposer, uint96 amount, bool settled) = ruleset.bondOf(_canonicalId(t, v, c, h));
         assertEq(proposer, bob);
@@ -194,7 +194,7 @@ contract BondRulesetTest is Test {
     function test_validateProposal_onlyGovernor() public {
         (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _lockArgs();
         vm.expectRevert(abi.encodeWithSelector(RulesetCounting.Unauthorized.selector, address(this)));
-        ruleset.validateProposal(makeAddr("bob"), t, v, c, h);
+        ruleset.validateProposal(_canonicalId(t, v, c, h), makeAddr("bob"), t, v, c);
     }
 
     function test_validateProposal_revertsWithoutApproval() public {
@@ -203,7 +203,7 @@ contract BondRulesetTest is Test {
         token.mint(bob, BOND); // funded but no approve
         vm.prank(governorMock);
         vm.expectRevert(); // SafeERC20 insufficient-allowance revert
-        ruleset.validateProposal(bob, t, v, c, h);
+        ruleset.validateProposal(_canonicalId(t, v, c, h), bob, t, v, c);
     }
 
     function test_validateProposal_duplicateLockReverts() public {
@@ -213,9 +213,9 @@ contract BondRulesetTest is Test {
         vm.prank(bob);
         token.approve(address(ruleset), 2 * BOND);
         vm.startPrank(governorMock);
-        ruleset.validateProposal(bob, t, v, c, h);
+        ruleset.validateProposal(_canonicalId(t, v, c, h), bob, t, v, c);
         vm.expectRevert(abi.encodeWithSelector(BondRuleset.BondAlreadyLocked.selector, _canonicalId(t, v, c, h)));
-        ruleset.validateProposal(bob, t, v, c, h);
+        ruleset.validateProposal(_canonicalId(t, v, c, h), bob, t, v, c);
         vm.stopPrank();
     }
 
@@ -229,6 +229,6 @@ contract BondRulesetTest is Test {
         feeToken.approve(address(feeRuleset), BOND);
         vm.prank(governorMock);
         vm.expectRevert(BondRuleset.InsufficientBondReceived.selector);
-        feeRuleset.validateProposal(bob, t, v, c, h);
+        feeRuleset.validateProposal(_canonicalId(t, v, c, h), bob, t, v, c);
     }
 }

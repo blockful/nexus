@@ -160,14 +160,15 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     /// @inheritdoc IProposalValidator
     /// @dev Records the bond then pulls it (checks-effects-interactions); reverts if the token
     ///      delivers less than `bondAmount`, so a fee-on-transfer token can never under-collateralize.
+    ///      Bonds key on the governor-computed `proposalId`; the action arrays are never read
+    ///      here, so their shape is left to the stock `_propose` downstream.
     function validateProposal(
+        uint256 proposalId,
         address proposer,
-        address[] calldata targets,
-        uint256[] calldata values,
-        bytes[] calldata calldatas,
-        bytes32 descriptionHash
+        address[] calldata,
+        uint256[] calldata,
+        bytes[] calldata
     ) external onlyGovernor {
-        uint256 proposalId = uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
 
         // Effect before interaction (CEI); bondAmount ≤ uint96.max by constructor.
