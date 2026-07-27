@@ -68,6 +68,12 @@ contract BondRulesetTest is Test {
         new BondRuleset(governorMock, IVotes(address(token)), 101, BOND, treasury);
     }
 
+    function test_constructor_revertsOnZeroQuorumNumerator() public {
+        // Zero would make `quorumReached` unconditionally true — rejected at construction.
+        vm.expectRevert(abi.encodeWithSelector(BondRuleset.InvalidQuorumFraction.selector, 0, 100));
+        new BondRuleset(governorMock, IVotes(address(token)), 0, BOND, treasury);
+    }
+
     function test_supportsInterface() public view {
         assertTrue(ruleset.supportsInterface(type(IRuleset).interfaceId));
         assertTrue(ruleset.supportsInterface(type(IProposalValidator).interfaceId));

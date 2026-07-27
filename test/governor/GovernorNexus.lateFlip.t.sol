@@ -7,6 +7,7 @@ import {Vm} from "forge-std/Vm.sol";
 
 import {GovernorNexus} from "../../src/GovernorNexus.sol";
 import {GovernorPreventLateFlip} from "../../src/GovernorPreventLateFlip.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Anti-snipe late-vote extension. The mechanism's public surface is deliberately
@@ -69,6 +70,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
     }
 
     function test_constructor_revertsWhenVotingPeriodNotBeyondExtensionWindow() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
         vm.expectRevert(
             abi.encodeWithSelector(GovernorNexus.VotingPeriodTooShort.selector, EXTENSION_WINDOW, EXTENSION_WINDOW)
         );
@@ -76,7 +78,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
             "GovernorNexus",
             IVotes(address(token)),
             timelock,
-            standardRuleset,
+            rs,
             VOTING_DELAY,
             // votingPeriod == window: the "final 24h" would be the whole vote. The cast is
             // safe: EXTENSION_WINDOW is 20.

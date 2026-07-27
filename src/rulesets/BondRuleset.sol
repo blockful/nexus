@@ -84,7 +84,8 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_, uint256 bondAmount_, address treasury_)
         RulesetCounting(governor_)
     {
-        if (quorumNumerator_ > QUORUM_DENOMINATOR) {
+        // Zero would make `quorumReached` unconditionally true — the gate must have teeth.
+        if (quorumNumerator_ == 0 || quorumNumerator_ > QUORUM_DENOMINATOR) {
             revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
         }
         if (bondAmount_ == 0 || bondAmount_ > type(uint96).max) revert InvalidBondAmount(bondAmount_);

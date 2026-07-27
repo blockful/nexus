@@ -53,13 +53,14 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
     }
 
     function test_constructor_emitsTypeRegistered() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
         vm.expectEmit(true, true, false, true);
-        emit TypeRegistered(0, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
+        emit TypeRegistered(0, rs, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
         new GovernorNexus(
             "GovernorNexus",
             IVotes(address(token)),
             timelock,
-            standardRuleset,
+            rs,
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -86,12 +87,13 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
     }
 
     function test_constructor_revertsOnZeroVotingPeriod() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
         new GovernorNexus(
             "GovernorNexus",
             IVotes(address(token)),
             timelock,
-            standardRuleset,
+            rs,
             VOTING_DELAY,
             0,
             PROPOSAL_THRESHOLD,
@@ -109,6 +111,28 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             IVotes(address(token)),
             timelock,
             IRuleset(address(notRuleset)),
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
+    function test_constructor_revertsOnRulesetBoundToAnotherGovernor() public {
+        // The fixture ruleset is bound to the fixture governor — a second governor deploy
+        // reusing it must be refused at registration of row 0.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                GovernorNexus.RulesetGovernorMismatch.selector, address(standardRuleset), address(governor)
+            )
+        );
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -197,6 +221,19 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             "165 but not IRuleset"
         );
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.RulesetInterfaceUnsupported.selector, address(notRuleset)));
+        governor.execute(t, v, c, h);
+    }
+
+    function test_registerType_revertsOnRulesetBoundToAnotherGovernor() public {
+        address otherGovernor = makeAddr("otherGovernor");
+        StandardRuleset foreign = new StandardRuleset(otherGovernor, IVotes(address(token)), 1);
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _prepareSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (foreign, VOTING_DELAY, VOTING_PERIOD, uint256(0))),
+            "foreign-bound ruleset"
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(GovernorNexus.RulesetGovernorMismatch.selector, address(foreign), otherGovernor)
+        );
         governor.execute(t, v, c, h);
     }
 

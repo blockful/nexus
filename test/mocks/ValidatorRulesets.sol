@@ -15,6 +15,13 @@ import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 /// @dev Minimal well-formed ruleset base: honest inert counting surface, so each concrete
 ///      mock is its one validator behavior and nothing else.
 abstract contract ValidatorMockBase is IRuleset {
+    /// @inheritdoc IRuleset
+    address public immutable governor;
+
+    constructor(address governor_) {
+        governor = governor_;
+    }
+
     function countVote(uint256, address, uint8, uint256 weight, bytes calldata) external pure returns (uint256) {
         return weight;
     }
@@ -44,6 +51,8 @@ abstract contract ValidatorMockBase is IRuleset {
 /// @dev Well-behaved validator: accepts every proposal. The healthy control a containment
 ///      test proposes through while a sibling type's validator is misbehaving.
 contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
     function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
         external
         pure {}
@@ -58,6 +67,8 @@ contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
 ///      only proposes of ITS OWN type brick; every other type is unaffected.
 contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
     error ValidatorPoisoned();
+
+    constructor(address governor_) ValidatorMockBase(governor_) {}
 
     function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
         external
@@ -74,6 +85,8 @@ contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
 
 /// @dev Attack: `validateProposal` burns all forwarded gas. Same containment expectation.
 contract GasBurnValidatorRuleset is ValidatorMockBase, IProposalValidator {
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
     function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
         external
         pure
@@ -94,6 +107,8 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
     error ShouldNeverRun();
 
     bool public advertiseValidator;
+
+    constructor(address governor_) ValidatorMockBase(governor_) {}
 
     function setAdvertiseValidator(bool advertise) external {
         advertiseValidator = advertise;

@@ -62,6 +62,12 @@ contract StandardRulesetTest is Test {
         new StandardRuleset(address(governor), IVotes(address(token)), 101);
     }
 
+    function test_constructor_revertsWithZeroQuorumNumerator() public {
+        // Zero would make `quorumReached` unconditionally true — rejected at construction.
+        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.InvalidQuorumFraction.selector, 0, 100));
+        new StandardRuleset(address(governor), IVotes(address(token)), 0);
+    }
+
     function _countVote(address voter, uint8 support, uint256 weight) internal returns (uint256) {
         vm.prank(address(governor));
         return ruleset.countVote(PROPOSAL_ID, voter, support, weight, "");

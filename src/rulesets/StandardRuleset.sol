@@ -45,7 +45,8 @@ contract StandardRuleset is RulesetCounting {
     /// @notice Quorum numerator over the fixed 100 denominator (e.g. `1` = 1%).
     uint256 public immutable quorumNumerator;
 
-    /// @notice `numerator` exceeds the denominator (100), which would yield a quorum > 100%.
+    /// @notice `numerator` is zero (disables the quorum gate entirely) or exceeds the
+    ///         denominator (100, a quorum > 100%).
     error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
 
     /// @param governor_ The GovernorNexus this ruleset is deployed for; immutable and never
@@ -53,9 +54,10 @@ contract StandardRuleset is RulesetCounting {
     ///        the deploy script's CREATE-address precompute).
     /// @param token_ Voting token backing `quorum`'s past-total-supply lookup.
     /// @param quorumNumerator_ Numerator over the fixed 100 denominator; reverts
-    ///        `InvalidQuorumFraction` above 100.
+    ///        `InvalidQuorumFraction` at zero (would make `quorumReached` unconditionally
+    ///        true) and above 100.
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_) RulesetCounting(governor_) {
-        if (quorumNumerator_ > QUORUM_DENOMINATOR) {
+        if (quorumNumerator_ == 0 || quorumNumerator_ > QUORUM_DENOMINATOR) {
             revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
         }
         token = token_;
@@ -65,9 +67,9 @@ contract StandardRuleset is RulesetCounting {
     /// @inheritdoc IRuleset
     /// @dev A `proposalId` this ruleset never counted reads from empty-tally defaults, same
     ///      as `hasVoted`. That can make this return `true` for an uncounted id whenever
-    ///      `quorum(0) == 0` (e.g. a zero quorum numerator, or a token with no supply at
-    ///      timepoint 0) — callers must gate on proposal existence; the governor does this
-    ///      via `state()`.
+    ///      `quorum(0) == 0` (a token with no supply at timepoint 0; a zero numerator is
+    ///      rejected at construction) — callers must gate on proposal existence; the
+    ///      governor does this via `state()`.
     ///
     ///      Non-monotonic under re-votes: a voter moving weight out of For/Abstain can
     ///      take a proposal back *below* quorum after it had been reached.

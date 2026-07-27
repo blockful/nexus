@@ -91,6 +91,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     error RulesetZeroAddress();
     /// @notice `ruleset` does not advertise `IRuleset` via ERC165.
     error RulesetInterfaceUnsupported(address ruleset);
+    /// @notice `ruleset` is bound to `boundGovernor`, not this governor — it would revert
+    ///         `Unauthorized` on first countVote/validateProposal, bricking the type.
+    error RulesetGovernorMismatch(address ruleset, address boundGovernor);
     /// @notice `votingPeriod` is zero, which would open a proposal with no voting window.
     error InvalidVotingPeriod();
     /// @notice `typeId` has never been registered (`typeId >= typeCount`).
@@ -150,7 +153,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     // ─────────────────────────── Type registry ───────────────────────────
 
     /// @notice Append a new proposal type at `typeCount`, registered active.
-    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165.
+    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165 and bound to this
+    ///        governor (`ruleset.governor() == address(this)`).
     /// @param votingDelay_ Blocks/seconds between propose and snapshot.
     /// @param votingPeriod_ Voting window length; must be non-zero.
     /// @param proposalThreshold_ Minimum proposer voting power.
@@ -212,6 +216,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         if (!ERC165Checker.supportsInterface(address(ruleset), type(IRuleset).interfaceId)) {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
+        address boundGovernor = ruleset.governor();
+        if (boundGovernor != address(this)) revert RulesetGovernorMismatch(address(ruleset), boundGovernor);
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
         // Enforces GovernorPreventLateFlip's integration requirement at type registration.
         if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
