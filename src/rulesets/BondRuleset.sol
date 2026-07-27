@@ -10,6 +10,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {IRuleset} from "../interfaces/IRuleset.sol";
 import {IProposalValidator} from "../interfaces/IProposalValidator.sol";
 import {RulesetCounting} from "../RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../RulesetQuorumFraction.sol";
 
 /// @dev Minimal governor surface BondRuleset consumes (StandardRuleset's IRulesetGovernor
 ///      pattern, extended with the two reads the settle path needs).
@@ -28,7 +29,7 @@ interface IBondGovernor {
 ///      balance always covers every unsettled bond. Resolution is permissionless and
 ///      one-shot; refunds release only in terminal states (`Executed`/`Defeated`/`Canceled`)
 ///      so the security council's veto window is never front-run.
-contract BondRuleset is RulesetCounting, IProposalValidator {
+contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidator {
     using SafeERC20 for IERC20;
 
     /// @dev Bravo ordering plus the slash option: 0=Against, 1=For, 2=Abstain,
@@ -55,12 +56,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         bool settled;
     }
 
-    uint256 private constant QUORUM_DENOMINATOR = 100;
-
-    /// @notice Voting token: quorum anchor and the bond's currency.
-    IVotes public immutable token;
-    /// @notice Quorum numerator over the fixed 100 denominator.
-    uint256 public immutable quorumNumerator;
     /// @notice ENS locked per proposal.
     uint256 public immutable bondAmount;
     /// @notice Forfeit destination — the DAO treasury (the timelock).
@@ -74,7 +69,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
     error InvalidBondAmount(uint256 amount);
     error ZeroTreasury();
-    error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
     error BondAlreadyLocked(uint256 proposalId);
     error InsufficientBondReceived();
     error NoBond(uint256 proposalId);
@@ -83,15 +77,10 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_, uint256 bondAmount_, address treasury_)
         RulesetCounting(governor_)
+        RulesetQuorumFraction(token_, quorumNumerator_)
     {
-        // Zero would make `quorumReached` unconditionally true — the gate must have teeth.
-        if (quorumNumerator_ == 0 || quorumNumerator_ > QUORUM_DENOMINATOR) {
-            revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
-        }
         if (bondAmount_ == 0 || bondAmount_ > type(uint96).max) revert InvalidBondAmount(bondAmount_);
         if (treasury_ == address(0)) revert ZeroTreasury();
-        token = token_;
-        quorumNumerator = quorumNumerator_;
         bondAmount = bondAmount_;
         treasury = treasury_;
     }
@@ -119,11 +108,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     /// @dev The three Bravo options plus AgainstAndSlash.
     function _isValidSupport(uint8 support) internal pure override returns (bool) {
         return support <= uint8(VoteType.AgainstAndSlash);
-    }
-
-    /// @inheritdoc IRuleset
-    function quorum(uint256 timepoint) public view returns (uint256) {
-        return token.getPastTotalSupply(timepoint) * quorumNumerator / QUORUM_DENOMINATOR;
     }
 
     /// @inheritdoc IRuleset

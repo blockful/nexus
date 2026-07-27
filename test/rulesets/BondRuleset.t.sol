@@ -9,6 +9,7 @@ import {BondRuleset} from "../../src/rulesets/BondRuleset.sol";
 import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 import {IProposalValidator} from "../../src/interfaces/IProposalValidator.sol";
 import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../../src/RulesetQuorumFraction.sol";
 import {MockENSToken} from "../mocks/MockENSToken.sol";
 import {FeeOnTransferToken} from "../mocks/FeeOnTransferToken.sol";
 
@@ -64,13 +65,13 @@ contract BondRulesetTest is Test {
     }
 
     function test_constructor_revertsOnQuorumAbove100() public {
-        vm.expectRevert(abi.encodeWithSelector(BondRuleset.InvalidQuorumFraction.selector, 101, 100));
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 101, 100));
         new BondRuleset(governorMock, IVotes(address(token)), 101, BOND, treasury);
     }
 
     function test_constructor_revertsOnZeroQuorumNumerator() public {
         // Zero would make `quorumReached` unconditionally true — rejected at construction.
-        vm.expectRevert(abi.encodeWithSelector(BondRuleset.InvalidQuorumFraction.selector, 0, 100));
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 0, 100));
         new BondRuleset(governorMock, IVotes(address(token)), 0, BOND, treasury);
     }
 

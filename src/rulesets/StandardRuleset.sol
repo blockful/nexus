@@ -6,6 +6,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {IRuleset} from "../interfaces/IRuleset.sol";
 import {RulesetCounting} from "../RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../RulesetQuorumFraction.sol";
 
 /// @dev Minimal governor surface StandardRuleset consumes — only `proposalSnapshot`, so a
 ///      registry or test can satisfy this with a trivial stand-in instead of a full governor.
@@ -26,7 +27,7 @@ interface IRulesetGovernor {
 ///      Immutable by design — what the DAO audited is what runs forever: no setters,
 ///      including for the quorum numerator. `countVote` is state-changing and therefore
 ///      restricted to `governor`, so third parties cannot stuff vote tallies.
-contract StandardRuleset is RulesetCounting {
+contract StandardRuleset is RulesetCounting, RulesetQuorumFraction {
     /// @dev Bravo-style bucket ordering: 0=Against, 1=For, 2=Abstain — the three options this
     ///      ruleset accepts (`_isValidSupport`).
     enum VoteType {
@@ -35,20 +36,6 @@ contract StandardRuleset is RulesetCounting {
         Abstain
     }
 
-    /// @dev Fixed at 100 so a numerator of 1 encodes 1%, matching OZ's default
-    ///      `GovernorVotesQuorumFraction` denominator. Not exposed — this ruleset offers no
-    ///      surface beyond `IRuleset`, and this value is not overridable.
-    uint256 private constant QUORUM_DENOMINATOR = 100;
-
-    /// @notice Voting token whose past total supply anchors `quorum`.
-    IVotes public immutable token;
-    /// @notice Quorum numerator over the fixed 100 denominator (e.g. `1` = 1%).
-    uint256 public immutable quorumNumerator;
-
-    /// @notice `numerator` is zero (disables the quorum gate entirely) or exceeds the
-    ///         denominator (100, a quorum > 100%).
-    error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
-
     /// @param governor_ The GovernorNexus this ruleset is deployed for; immutable and never
     ///        revisited, so it must be the address the governor will actually deploy to (see
     ///        the deploy script's CREATE-address precompute).
@@ -56,13 +43,10 @@ contract StandardRuleset is RulesetCounting {
     /// @param quorumNumerator_ Numerator over the fixed 100 denominator; reverts
     ///        `InvalidQuorumFraction` at zero (would make `quorumReached` unconditionally
     ///        true) and above 100.
-    constructor(address governor_, IVotes token_, uint256 quorumNumerator_) RulesetCounting(governor_) {
-        if (quorumNumerator_ == 0 || quorumNumerator_ > QUORUM_DENOMINATOR) {
-            revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
-        }
-        token = token_;
-        quorumNumerator = quorumNumerator_;
-    }
+    constructor(address governor_, IVotes token_, uint256 quorumNumerator_)
+        RulesetCounting(governor_)
+        RulesetQuorumFraction(token_, quorumNumerator_)
+    {}
 
     /// @inheritdoc IRuleset
     /// @dev A `proposalId` this ruleset never counted reads from empty-tally defaults, same
@@ -106,11 +90,6 @@ contract StandardRuleset is RulesetCounting {
     /// @dev The three Bravo options — parity with the live ENS governor's counting surface.
     function _isValidSupport(uint8 support) internal pure override returns (bool) {
         return support <= uint8(VoteType.Abstain);
-    }
-
-    /// @inheritdoc IRuleset
-    function quorum(uint256 timepoint) public view returns (uint256) {
-        return token.getPastTotalSupply(timepoint) * quorumNumerator / QUORUM_DENOMINATOR;
     }
 
     /// @inheritdoc IRuleset
