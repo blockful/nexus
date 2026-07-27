@@ -49,10 +49,11 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
         None
     }
 
-    /// @notice A locked proposal bond.
+    /// @notice A locked proposal bond. The locked amount is not stored — `bondAmount` is
+    ///         immutable and under-delivery reverts at lock, so every bond holds exactly
+    ///         `bondAmount`. Packs into a single slot.
     struct Bond {
         address proposer;
-        uint96 amount;
         bool settled;
     }
 
@@ -79,16 +80,17 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
         RulesetCounting(governor_)
         RulesetQuorumFraction(token_, quorumNumerator_)
     {
-        if (bondAmount_ == 0 || bondAmount_ > type(uint96).max) revert InvalidBondAmount(bondAmount_);
+        if (bondAmount_ == 0) revert InvalidBondAmount(bondAmount_);
         if (treasury_ == address(0)) revert ZeroTreasury();
         bondAmount = bondAmount_;
         treasury = treasury_;
     }
 
-    /// @notice The bond locked for `proposalId` (zeroed struct if none).
-    function bondOf(uint256 proposalId) external view returns (address proposer, uint96 amount, bool settled) {
+    /// @notice The bond locked for `proposalId` (zeroed if none). Every locked bond holds
+    ///         exactly `bondAmount` — read that immutable for the amount.
+    function bondOf(uint256 proposalId) external view returns (address proposer, bool settled) {
         Bond storage bond = _bonds[proposalId];
-        return (bond.proposer, bond.amount, bond.settled);
+        return (bond.proposer, bond.settled);
     }
 
     /// @notice Per-bucket tallies: Bravo triple plus the slash bucket.
@@ -155,9 +157,8 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
     ) external onlyGovernor {
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
 
-        // Effect before interaction (CEI); bondAmount ≤ uint96.max by constructor.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(bondAmount), settled: false});
+        // Effect before interaction (CEI).
+        _bonds[proposalId] = Bond({proposer: proposer, settled: false});
 
         IERC20 erc20 = IERC20(address(token));
         uint256 balanceBefore = erc20.balanceOf(address(this));
@@ -229,9 +230,8 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
     /// @dev One-shot settle: flag first, single transfer after (CEI).
     function _settle(uint256 proposalId, Bond storage bond, address to, SlashReason reason, bool slashed) private {
         bond.settled = true;
-        uint256 amount = bond.amount;
-        IERC20(address(token)).safeTransfer(to, amount);
-        if (slashed) emit BondSlashed(proposalId, amount, reason);
-        else emit BondRefunded(proposalId, bond.proposer, amount);
+        IERC20(address(token)).safeTransfer(to, bondAmount);
+        if (slashed) emit BondSlashed(proposalId, bondAmount, reason);
+        else emit BondRefunded(proposalId, bond.proposer, bondAmount);
     }
 }

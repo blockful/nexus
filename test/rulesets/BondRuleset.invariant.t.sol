@@ -140,8 +140,8 @@ contract BondRulesetInvariantTest is BondRulesetTestBase {
         uint256 owed;
         uint256 n = handler.idsLength();
         for (uint256 i = 0; i < n; ++i) {
-            (, uint96 amount, bool settled) = bondRuleset.bondOf(handler.idAt(i));
-            if (!settled) owed += amount;
+            (address bondProposer, bool settled) = bondRuleset.bondOf(handler.idAt(i));
+            if (bondProposer != address(0) && !settled) owed += bondRuleset.bondAmount();
         }
         assertGe(token.balanceOf(address(bondRuleset)), owed);
     }
