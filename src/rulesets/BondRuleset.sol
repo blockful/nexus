@@ -206,7 +206,7 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
         if (state == IGovernor.ProposalState.Executed) return (proposer, SlashReason.None, false);
         if (state == IGovernor.ProposalState.Defeated) {
-            if (_slashVoted(proposalId, proposer)) return (treasury, SlashReason.SlashVote, true);
+            if (_slashVoted(proposalId)) return (treasury, SlashReason.SlashVote, true);
             return (proposer, SlashReason.None, false);
         }
         if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId, proposer);
@@ -229,20 +229,14 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         return (treasury, SlashReason.ActiveSelfCancel, true);
     }
 
-    /// @dev Slash predicate: rejections beat approvals AND, with the proposer's own standing
-    ///      vote removed from both opposition buckets, slash-weight beats plain-No.
-    function _slashVoted(uint256 proposalId, address proposer) private view returns (bool) {
-        uint256 forVotes = tally(proposalId, uint8(VoteType.For));
-        uint256 againstVotes = tally(proposalId, uint8(VoteType.Against));
+    /// @dev Slash predicate: confiscation fires only when slash-weight is the STRICT plurality
+    ///      among the three expressive buckets — it must outweigh support (For) and plain
+    ///      rejection (Against); either tie refunds. Raw tallies, no per-address scrubbing.
+    function _slashVoted(uint256 proposalId) private view returns (bool) {
         uint256 slashVotes = tally(proposalId, uint8(VoteType.AgainstAndSlash));
-        if (againstVotes + slashVotes <= forVotes) return false;
-
-        (bool voted, uint8 support, uint256 weight) = voteReceipt(proposalId, proposer);
-        if (voted) {
-            if (support == uint8(VoteType.Against)) againstVotes -= weight;
-            else if (support == uint8(VoteType.AgainstAndSlash)) slashVotes -= weight;
-        }
-        return slashVotes > againstVotes;
+        return
+            slashVotes > tally(proposalId, uint8(VoteType.For))
+                && slashVotes > tally(proposalId, uint8(VoteType.Against));
     }
 
     /// @dev One-shot settle: flag first, single transfer after (CEI).
