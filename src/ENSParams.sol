@@ -13,7 +13,6 @@ library ENSParams {
     uint48 internal constant VOTING_DELAY = 1; // blocks
     uint32 internal constant VOTING_PERIOD = 45_818; // blocks (~1 week)
     uint256 internal constant PROPOSAL_THRESHOLD = 100_000e18; // 100k ENS
-    uint256 internal constant BOND_AMOUNT = 1_000e18;
     // Not read from the live governor (it has no such mechanism): per-proposer cap on
     // concurrently live proposals.
     uint8 internal constant MAX_ACTIVE_PROPOSALS = 2;

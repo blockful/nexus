@@ -265,6 +265,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     }
 
     /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    /// @dev 0 is a double-duty sentinel: it also covers a proposal canceled directly on the
+    ///      timelock (security-council veto), which never runs the governor's `_cancel`.
+    ///      Consumers disambiguate by checking `state(proposalId) == Canceled` first — see
+    ///      BondRuleset's cancel partition.
     function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
         return _canceledAt[proposalId];
     }
