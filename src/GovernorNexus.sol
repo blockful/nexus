@@ -367,17 +367,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         }
     }
 
-    /// @dev Liveness probe that is deliberately ruleset-free, so a ruleset with poisoned views
-    ///      can never brick its proposer's next propose (the prune loop runs on every propose).
-    ///      Within the original deadline it reads `state()`, which resolves purely from core
-    ///      storage (Pending/Active) — the early return keeps `state()` from ever being consulted
-    ///      past the deadline, where it would dispatch to a ruleset. Past the original deadline it
-    ///      decides from the late-flip stage alone (also core storage): `None` can never extend,
-    ///      so the id is dead; otherwise it may still sit inside its one-shot extension window,
-    ///      treated as live until `originalDeadline + extensionDuration` and dead beyond. This is
-    ///      conservative for a `FailingObserved` id that ends up failing — it holds the slot up to
-    ///      `extensionDuration` longer than strictly needed — because its true deadline depends on
-    ///      `_wouldPass`, which needs a ruleset the probe must not call.
+    /// @dev Liveness probe kept deliberately ruleset-free: a ruleset with poisoned views must
+    ///      never be able to brick its proposer's next propose (this runs in the prune loop on
+    ///      every propose). Hence it never routes through `_wouldPass`, and is conservative for a
+    ///      `FailingObserved` id — holding the slot up to `extensionDuration` longer than needed.
     function _isLive(uint256 proposalId) private view returns (bool) {
         uint256 originalDeadline = _originalDeadline(proposalId);
         if (clock() <= originalDeadline) {

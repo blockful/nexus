@@ -170,6 +170,18 @@ all-or-nothing) auditable in one place.
   to split voting power across multiple addresses — accepted, consistent with every
   per-address proposal cap in production governance (Bravo/Nouns/Uniswap all share this
   property).
+- **The liveness probe (`_isLive`) is deliberately ruleset-free.** Because the lazy prune
+  runs on *every* propose, a probe that dispatched to the pinned ruleset would let a
+  ruleset with poisoned (reverting) views brick its own proposer's next propose. So the
+  probe reads only core storage: within the original deadline it consults `state()` (which
+  resolves purely from `Pending`/`Active` there), and past the original deadline it decides
+  from the late-flip stage alone — a `None` stage can never extend, so the id is dead;
+  otherwise the id may still sit in its one-shot extension window and is treated as live
+  until `originalDeadline + extensionDuration`. It never calls `_wouldPass` (the only
+  ruleset-dependent path). The cost is a deliberate over-approximation: a `FailingObserved`
+  id that ends up failing holds its slot up to `extensionDuration` longer than strictly
+  necessary, because its true deadline can only be known by asking the ruleset the probe
+  must not call.
 
 ## Optimistic ruleset
 
