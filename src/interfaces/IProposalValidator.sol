@@ -9,8 +9,7 @@ interface IProposalValidator {
     /// @notice Validates a proposal's content before creation; MUST revert iff the
     ///         proposal must not be created under this ruleset's type.
     /// @param proposalId The canonical id the governor computed for this proposal
-    ///        (`hashProposal(targets, values, calldatas, descriptionHash)`); validators
-    ///        keying state per proposal MUST use it and never re-derive their own.
+    ///        (`hashProposal(targets, values, calldatas, descriptionHash)`).
     /// @param proposer The account creating the proposal.
     /// @param targets Call targets, one per action.
     /// @param values ETH values, one per action.
