@@ -70,6 +70,26 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         );
     }
 
+    /// @dev Genesis default is announced like any later change — event-sourcing indexers
+    ///      reconstruct the default-type pointer with no deployment special case.
+    function test_constructor_emitsGenesisDefaultTypeSet() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
+        vm.expectEmit(true, false, false, true);
+        emit DefaultTypeSet(0);
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            rs,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
     function test_constructor_revertsOnZeroRuleset() public {
         vm.expectRevert(GovernorNexus.RulesetZeroAddress.selector);
         new GovernorNexus(

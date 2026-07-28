@@ -150,6 +150,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
+        emit DefaultTypeSet(0);
         _setMaxActiveProposals(maxActiveProposals_);
     }
 
@@ -264,6 +265,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     }
 
     /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    /// @dev 0 is a double-duty sentinel: it also covers a proposal canceled directly on the
+    ///      timelock (security-council veto), which never runs the governor's `_cancel`.
+    ///      Consumers disambiguate by checking `state(proposalId) == Canceled` first — see
+    ///      BondRuleset's cancel partition.
     function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
         return _canceledAt[proposalId];
     }
@@ -342,7 +347,13 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         TypeConfig storage config = _types[typeId];
         if (config.hasProposalValidation) {
             IProposalValidator(address(config.ruleset))
-                .validateProposal(proposer, targets, values, calldatas, keccak256(bytes(description)));
+                .validateProposal(
+                    hashProposal(targets, values, calldatas, keccak256(bytes(description))),
+                    proposer,
+                    targets,
+                    values,
+                    calldatas
+                );
         }
 
         _typeContext = uint16(typeId) + 1;
