@@ -260,6 +260,7 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _boxCall(2, "canceled");
         vm.prank(alice);
         uint256 p2 = governor.propose(t, v, c, "canceled");
+        vm.roll(block.number + 1); // cancel is barred in the propose block; p2 still Pending
         vm.prank(alice);
         governor.cancel(t, v, c, h);
         vm.roll(governor.proposalSnapshot(p2) + 1); // p1 and p2 share timing; p1 active

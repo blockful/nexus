@@ -26,7 +26,7 @@ contract GovernorNexusProposalValidationTest is GovernorNexusTestBase {
 
     function setUp() public virtual override {
         super.setUp();
-        accepting = new AcceptingValidatorRuleset();
+        accepting = new AcceptingValidatorRuleset(address(governor));
         _executeSelfCall(
             abi.encodeCall(GovernorNexus.registerType, (accepting, VOTING_DELAY, VOTING_PERIOD, uint256(0))),
             "register accepting validator type"
@@ -69,7 +69,7 @@ contract GovernorNexusProposalValidationTest is GovernorNexusTestBase {
     }
 
     function test_hasProposalValidationIsPinnedAtRegistration_neverRequeried() public {
-        ToggleableValidatorRuleset toggleable = new ToggleableValidatorRuleset();
+        ToggleableValidatorRuleset toggleable = new ToggleableValidatorRuleset(address(governor));
         // Registered while NOT advertising the validator interface -> pinned false.
         uint8 typeId = _registerRuleset(toggleable, "register toggleable");
         assertFalse(governor.getTypeConfig(typeId).hasProposalValidation);
@@ -85,7 +85,7 @@ contract GovernorNexusProposalValidationTest is GovernorNexusTestBase {
     // ─────────────────────────── revert propagation ───────────────────────────
 
     function test_validatorRevertLeavesProposalUncreated() public {
-        PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset();
+        PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset(address(governor));
         uint8 poisonedType = _registerRuleset(poisoned, "register poisoned validator");
 
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _dummyProposal();
@@ -111,7 +111,7 @@ contract GovernorNexusProposalValidationTest is GovernorNexusTestBase {
     // ─────────────────────────── misbehaving-validator containment ───────────────────────────
 
     function test_poisonedValidator_bricksOnlyItsOwnType() public {
-        PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset();
+        PoisonedValidatorRuleset poisoned = new PoisonedValidatorRuleset(address(governor));
         uint8 poisonedType = _registerRuleset(poisoned, "register poisoned validator");
         assertTrue(governor.getTypeConfig(poisonedType).hasProposalValidation);
 
@@ -132,7 +132,7 @@ contract GovernorNexusProposalValidationTest is GovernorNexusTestBase {
     }
 
     function test_gasBurnValidator_bricksOnlyItsOwnType() public {
-        GasBurnValidatorRuleset gasBurner = new GasBurnValidatorRuleset();
+        GasBurnValidatorRuleset gasBurner = new GasBurnValidatorRuleset(address(governor));
         uint8 burnType = _registerRuleset(gasBurner, "register gas burner");
 
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas) = _dummyProposal();
