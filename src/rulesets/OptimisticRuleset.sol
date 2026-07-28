@@ -31,6 +31,9 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     /// @notice Governance executor that owns the allowlist setters. Must be the address
     ///         governance executions come from (the timelock), NOT the governor —
     ///         restricting to the governor would make the setters unreachable.
+    /// @dev Immutable, no successor path: if the DAO ever migrates executors, this ruleset's
+    ///      allowlists freeze as-is — the migration is deploying a fresh ruleset bound to the
+    ///      new executor and re-registering the type.
     address public immutable admin;
 
     /// @notice Absolute Against weight at which a proposal is defeated.
@@ -83,16 +86,18 @@ contract OptimisticRuleset is RulesetCounting, IProposalValidator {
     // ─────────────────────────── Propose-time validation ───────────────────────────
 
     /// @inheritdoc IProposalValidator
-    /// @dev Checks the three lengths itself, before any indexing — it must hold with no
-    ///      assumption about what runs after it in the governor. Empty proposals pass
-    ///      vacuously (nothing is indexed; the stock `_propose` rejects them downstream).
-    ///      Restricted to the governor so third parties cannot probe with spoofed arguments.
+    /// @dev Validates exactly what it dereferences: the three arrays are indexed below, so
+    ///      their lengths are checked first, with no assumption about what runs after it in
+    ///      the governor. Empty proposals pass vacuously (nothing is indexed; the stock
+    ///      `_propose` rejects them downstream). The governor-computed id is unused — this
+    ///      validator keeps no per-proposal state. Restricted to the governor so third
+    ///      parties cannot probe with spoofed arguments.
     function validateProposal(
+        uint256,
         address proposer,
         address[] calldata targets,
         uint256[] calldata values,
-        bytes[] calldata calldatas,
-        bytes32
+        bytes[] calldata calldatas
     ) external view onlyGovernor {
         if (targets.length != values.length || values.length != calldatas.length) {
             revert LengthMismatch();

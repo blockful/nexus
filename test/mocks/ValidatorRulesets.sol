@@ -53,7 +53,7 @@ abstract contract ValidatorMockBase is IRuleset {
 contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
     constructor(address governor_) ValidatorMockBase(governor_) {}
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure {}
 
@@ -70,7 +70,7 @@ contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
 
     constructor(address governor_) ValidatorMockBase(governor_) {}
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {
@@ -87,7 +87,7 @@ contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
 contract GasBurnValidatorRuleset is ValidatorMockBase, IProposalValidator {
     constructor(address governor_) ValidatorMockBase(governor_) {}
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {
@@ -115,7 +115,7 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
     }
 
     /// @dev Would brick every propose if the gate ever became live for this type.
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {
