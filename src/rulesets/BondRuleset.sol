@@ -160,8 +160,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     /// @inheritdoc IProposalValidator
     /// @dev Records the bond then pulls it (checks-effects-interactions); reverts if the token
     ///      delivers less than `bondAmount`, so a fee-on-transfer token can never under-collateralize.
-    ///      Bonds key on the governor-computed `proposalId`; the action arrays are never read
-    ///      here, so their shape is left to the stock `_propose` downstream.
     function validateProposal(
         uint256 proposalId,
         address proposer,
