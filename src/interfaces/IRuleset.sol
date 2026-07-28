@@ -43,6 +43,12 @@ interface IRuleset is IERC165 {
     ///      (empty-tally default), never as an error.
     function hasVoted(uint256 proposalId, address voter) external view returns (bool);
 
+    /// @notice The governor this ruleset is bound to — its sole authorized `countVote` caller.
+    /// @dev Read once at type registration: a governor refuses rulesets bound elsewhere, so a
+    ///      mis-wired deployment reverts at `registerType` instead of shipping a type that
+    ///      bricks on first propose/vote.
+    function governor() external view returns (address);
+
     /// Tooling/view support only — never used for outcome logic (that is `quorumReached`).
     function quorum(uint256 timepoint) external view returns (uint256);
 

@@ -93,6 +93,16 @@ abstract contract GovernorNexusTestBase is Test {
         return new StandardRuleset(address(governor), IVotes(address(token)), 1);
     }
 
+    /// @dev StandardRuleset bound to the address the NEXT `new GovernorNexus(...)` from this
+    ///      test contract will deploy to — registration checks the binding, so tests that
+    ///      deploy a second governor need a ruleset wired to it, not to the fixture governor.
+    ///      Exactly one deploy (the ruleset itself) must sit between this call and that
+    ///      governor deploy.
+    function _rulesetForNextGovernor() internal returns (StandardRuleset) {
+        address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        return new StandardRuleset(predicted, IVotes(address(token)), 1);
+    }
+
     // ───────────────── Governance loop (the only path to the setters) ─────────────────
 
     /// @dev Propose (self-call) → vote → queue → warp past timelock; leaves the proposal

@@ -57,7 +57,12 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
     /// @dev Drives `proposalId` from Pending into the target state. Assumes the standard
     ///      `_args` payload and that nobody but (optionally) alice votes.
     function _reachState(uint256 proposalId, string memory description, IGovernor.ProposalState target) internal {
-        if (target == IGovernor.ProposalState.Pending) return;
+        if (target == IGovernor.ProposalState.Pending) {
+            // leave the propose block so cancel attempts exercise the state/threshold
+            // clauses, not the propose-block bar (clock == snapshot is still Pending)
+            vm.roll(block.number + 1);
+            return;
+        }
         vm.roll(governor.proposalSnapshot(proposalId) + 1);
         if (target == IGovernor.ProposalState.Active) return;
         if (target != IGovernor.ProposalState.Defeated) {
@@ -130,6 +135,7 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
 
     function test_selfCancel_pending() public {
         uint256 id = _proposeAs(bob, "p");
+        vm.roll(block.number + 1); // clock == snapshot: still Pending, past the propose block
         vm.expectEmit(address(governor));
         emit IGovernor.ProposalCanceled(id);
         _cancelAs(bob, "p");
@@ -292,6 +298,7 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
             _args("bondlike");
         vm.prank(dave);
         uint256 id = governor.proposeWithType(targets, values, calldatas, "bondlike", 1);
+        vm.roll(block.number + 1); // past the propose block; still Pending
 
         _expectUnableToCancel(id, carol);
         _cancelAs(carol, "bondlike");
@@ -327,9 +334,22 @@ contract GovernorNexusCancelTest is GovernorNexusTestBase {
             _args("poisoned");
         vm.prank(bob);
         uint256 id = governor.proposeWithType(targets, values, calldatas, "poisoned", 1);
+        vm.roll(block.number + 1); // past the propose block; still Pending
 
         vm.prank(bob);
         governor.cancel(targets, values, calldatas, descriptionHash);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
+    }
+
+    // ─────────────────────── Propose-block bar ───────────────────────
+
+    function test_cancelInProposeBlock_denied_thenNextBlockSucceeds() public {
+        uint256 id = _proposeAs(bob, "same-block");
+        _expectUnableToCancel(id, bob);
+        _cancelAs(bob, "same-block"); // atomic propose→cancel round-trip is unrepresentable
+
+        vm.roll(block.number + 1); // one block later the ordinary Pending self-cancel works
+        _cancelAs(bob, "same-block");
         assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
     }
 

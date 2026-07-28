@@ -91,8 +91,14 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     error RulesetZeroAddress();
     /// @notice `ruleset` does not advertise `IRuleset` via ERC165.
     error RulesetInterfaceUnsupported(address ruleset);
+    /// @notice `ruleset` is bound to `boundGovernor`, not this governor — it would revert
+    ///         `Unauthorized` on first countVote/validateProposal, bricking the type.
+    error RulesetGovernorMismatch(address ruleset, address boundGovernor);
     /// @notice `votingPeriod` is zero, which would open a proposal with no voting window.
     error InvalidVotingPeriod();
+    /// @notice `votingDelay` is zero, which would put the snapshot in the propose block
+    ///         (flash-loanable voting power) and erase the pre-vote cancel window.
+    error InvalidVotingDelay();
     /// @notice `typeId` has never been registered (`typeId >= typeCount`).
     error NonexistentType(uint8 typeId);
     /// @notice `typeId` is the current default and cannot be deactivated.
@@ -144,13 +150,15 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
+        emit DefaultTypeSet(0);
         _setMaxActiveProposals(maxActiveProposals_);
     }
 
     // ─────────────────────────── Type registry ───────────────────────────
 
     /// @notice Append a new proposal type at `typeCount`, registered active.
-    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165.
+    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165 and bound to this
+    ///        governor (`ruleset.governor() == address(this)`).
     /// @param votingDelay_ Blocks/seconds between propose and snapshot.
     /// @param votingPeriod_ Voting window length; must be non-zero.
     /// @param proposalThreshold_ Minimum proposer voting power.
@@ -212,6 +220,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         if (!ERC165Checker.supportsInterface(address(ruleset), type(IRuleset).interfaceId)) {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
+        address boundGovernor = ruleset.governor();
+        if (boundGovernor != address(this)) revert RulesetGovernorMismatch(address(ruleset), boundGovernor);
+        if (votingDelay_ == 0) revert InvalidVotingDelay();
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
         // Enforces GovernorPreventLateFlip's integration requirement at type registration.
         if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
@@ -254,6 +265,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     }
 
     /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    /// @dev 0 is a double-duty sentinel: it also covers a proposal canceled directly on the
+    ///      timelock (security-council veto), which never runs the governor's `_cancel`.
+    ///      Consumers disambiguate by checking `state(proposalId) == Canceled` first — see
+    ///      BondRuleset's cancel partition.
     function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
         return _canceledAt[proposalId];
     }
@@ -332,7 +347,13 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         TypeConfig storage config = _types[typeId];
         if (config.hasProposalValidation) {
             IProposalValidator(address(config.ruleset))
-                .validateProposal(proposer, targets, values, calldatas, keccak256(bytes(description)));
+                .validateProposal(
+                    hashProposal(targets, values, calldatas, keccak256(bytes(description))),
+                    proposer,
+                    targets,
+                    values,
+                    calldatas
+                );
         }
 
         _typeContext = uint16(typeId) + 1;
@@ -583,17 +604,25 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     // ─────────────────────────── Cancel policy ───────────────────────────
 
-    /// @dev Cancel authorization: only while the proposal is Pending or Active — by the
-    ///      proposer, or by anyone when the pinned type's `proposalThreshold` is nonzero
-    ///      and the proposer's prior-block votes fall below it.
+    /// @dev Cancel authorization: only while the proposal is Pending or Active, and never in
+    ///      the propose block — by the proposer, or by anyone when the pinned type's
+    ///      `proposalThreshold` is nonzero and the proposer's prior-block votes fall below it.
+    ///      The propose-block bar makes the atomic propose→cancel→settle round-trip (which
+    ///      would flash-borrow away a proposal bond's capital cost) unrepresentable, and keeps
+    ///      a depth-1 reorg from changing a cancel's economic outcome.
     function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
         ProposalState s = state(proposalId);
         if (s != ProposalState.Pending && s != ProposalState.Active) return false;
 
+        // snapshot − delay = the propose block; both operands come from core storage, so the
+        // probe stays ruleset-free. `state()` above already rejected nonexistent ids.
+        TypeConfig storage config = _types[proposalType(proposalId)];
+        if (clock() == proposalSnapshot(proposalId) - config.votingDelay) return false;
+
         address proposer = proposalProposer(proposalId);
         if (caller == proposer) return true;
 
-        uint256 votesThreshold = _types[proposalType(proposalId)].proposalThreshold;
+        uint256 votesThreshold = config.proposalThreshold;
         return votesThreshold > 0 && getVotes(proposer, clock() - 1) < votesThreshold;
     }
 

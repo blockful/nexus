@@ -15,6 +15,13 @@ import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 /// @dev Minimal well-formed ruleset base: honest inert counting surface, so each concrete
 ///      mock is its one validator behavior and nothing else.
 abstract contract ValidatorMockBase is IRuleset {
+    /// @inheritdoc IRuleset
+    address public immutable governor;
+
+    constructor(address governor_) {
+        governor = governor_;
+    }
+
     function countVote(uint256, address, uint8, uint256 weight, bytes calldata) external pure returns (uint256) {
         return weight;
     }
@@ -44,7 +51,9 @@ abstract contract ValidatorMockBase is IRuleset {
 /// @dev Well-behaved validator: accepts every proposal. The healthy control a containment
 ///      test proposes through while a sibling type's validator is misbehaving.
 contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure {}
 
@@ -59,7 +68,9 @@ contract AcceptingValidatorRuleset is ValidatorMockBase, IProposalValidator {
 contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
     error ValidatorPoisoned();
 
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {
@@ -74,7 +85,9 @@ contract PoisonedValidatorRuleset is ValidatorMockBase, IProposalValidator {
 
 /// @dev Attack: `validateProposal` burns all forwarded gas. Same containment expectation.
 contract GasBurnValidatorRuleset is ValidatorMockBase, IProposalValidator {
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {
@@ -95,12 +108,14 @@ contract ToggleableValidatorRuleset is ValidatorMockBase, IProposalValidator {
 
     bool public advertiseValidator;
 
+    constructor(address governor_) ValidatorMockBase(governor_) {}
+
     function setAdvertiseValidator(bool advertise) external {
         advertiseValidator = advertise;
     }
 
     /// @dev Would brick every propose if the gate ever became live for this type.
-    function validateProposal(address, address[] calldata, uint256[] calldata, bytes[] calldata, bytes32)
+    function validateProposal(uint256, address, address[] calldata, uint256[] calldata, bytes[] calldata)
         external
         pure
     {

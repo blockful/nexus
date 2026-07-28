@@ -8,6 +8,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../../src/RulesetQuorumFraction.sol";
 import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {MockENSToken} from "../mocks/MockENSToken.sol";
 import {MockGovernor} from "../mocks/MockGovernor.sol";
@@ -58,8 +59,14 @@ contract StandardRulesetTest is Test {
     }
 
     function test_constructor_revertsWithQuorumNumeratorAboveDenominator() public {
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.InvalidQuorumFraction.selector, 101, 100));
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 101, 100));
         new StandardRuleset(address(governor), IVotes(address(token)), 101);
+    }
+
+    function test_constructor_revertsWithZeroQuorumNumerator() public {
+        // Zero would make `quorumReached` unconditionally true — rejected at construction.
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 0, 100));
+        new StandardRuleset(address(governor), IVotes(address(token)), 0);
     }
 
     function _countVote(address voter, uint8 support, uint256 weight) internal returns (uint256) {

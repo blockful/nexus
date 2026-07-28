@@ -96,6 +96,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     function test_canceledProposal_freesSlot_sameBlock() public {
         _proposeAs(bob, "p1");
         _proposeAs(bob, "p2");
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         // concurrency cap, not a rate limit: cancel-then-repropose succeeds in the same block
         _cancelAs(bob, "p1");
         uint256 id3 = _proposeAs(bob, "p3");
@@ -166,14 +167,15 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     // ─────────────────────────── Setter guards ───────────────────────────
 
     function test_constructor_rejectsZeroAndAboveCeiling() public {
-        StandardRuleset ruleset = _newRuleset();
-
+        // A reverting CREATE still consumes the deployer's nonce, so each attempt needs its
+        // own next-address-bound ruleset — deployed before expectRevert arms.
+        StandardRuleset rs0 = _rulesetForNextGovernor();
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.InvalidMaxActiveProposals.selector, 0));
         new GovernorNexus(
             "t",
             IVotes(address(token)),
             timelock,
-            ruleset,
+            rs0,
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -182,12 +184,13 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
             EXTENSION_DURATION
         );
 
+        StandardRuleset rs11 = _rulesetForNextGovernor();
         vm.expectRevert(abi.encodeWithSelector(GovernorNexus.InvalidMaxActiveProposals.selector, 11));
         new GovernorNexus(
             "t",
             IVotes(address(token)),
             timelock,
-            ruleset,
+            rs11,
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -198,12 +201,11 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
     }
 
     function test_constructor_acceptsBounds() public {
-        StandardRuleset ruleset = _newRuleset();
         GovernorNexus g1 = new GovernorNexus(
             "t",
             IVotes(address(token)),
             timelock,
-            ruleset,
+            _rulesetForNextGovernor(),
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -216,7 +218,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
             "t",
             IVotes(address(token)),
             timelock,
-            ruleset,
+            _rulesetForNextGovernor(),
             VOTING_DELAY,
             VOTING_PERIOD,
             PROPOSAL_THRESHOLD,
@@ -260,6 +262,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         (address[] memory targets, uint256[] memory values, bytes[] memory calldatas,) = _args("p4");
         governor.propose(targets, values, calldatas, "p4");
 
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         _cancelAs(bob, "p3");
         uint256 id5 = _proposeAs(bob, "p5");
         assertEq(uint8(governor.state(id5)), uint8(IGovernor.ProposalState.Pending));
@@ -275,6 +278,7 @@ contract GovernorNexusSpamLimitTest is GovernorNexusTestBase {
         _proposeAs(bob, "p1");
         _proposeAs(bob, "p2");
         assertEq(governor.activeProposalCount(bob), 2);
+        vm.roll(block.number + 1); // cancel is barred in the propose block itself
         // cancel without any propose (no prune runs): the view must filter the dead id
         _cancelAs(bob, "p2");
         assertEq(governor.activeProposalCount(bob), 1);
