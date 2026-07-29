@@ -10,6 +10,7 @@ import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {IRuleset} from "../interfaces/IRuleset.sol";
 import {IProposalValidator} from "../interfaces/IProposalValidator.sol";
 import {RulesetCounting} from "../RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../RulesetQuorumFraction.sol";
 
 /// @dev Minimal governor surface BondRuleset consumes (StandardRuleset's IRulesetGovernor
 ///      pattern, extended with the two reads the settle path needs).
@@ -28,7 +29,7 @@ interface IBondGovernor {
 ///      balance always covers every unsettled bond. Resolution is permissionless and
 ///      one-shot; refunds release only in terminal states (`Executed`/`Defeated`/`Canceled`)
 ///      so the security council's veto window is never front-run.
-contract BondRuleset is RulesetCounting, IProposalValidator {
+contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidator {
     using SafeERC20 for IERC20;
 
     /// @dev Bravo ordering plus the slash option: 0=Against, 1=For, 2=Abstain,
@@ -48,19 +49,14 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         None
     }
 
-    /// @notice A locked proposal bond.
+    /// @notice A locked proposal bond. The locked amount is not stored — `bondAmount` is
+    ///         immutable and under-delivery reverts at lock, so every bond holds exactly
+    ///         `bondAmount`. Packs into a single slot.
     struct Bond {
         address proposer;
-        uint96 amount;
         bool settled;
     }
 
-    uint256 private constant QUORUM_DENOMINATOR = 100;
-
-    /// @notice Voting token: quorum anchor and the bond's currency.
-    IVotes public immutable token;
-    /// @notice Quorum numerator over the fixed 100 denominator.
-    uint256 public immutable quorumNumerator;
     /// @notice ENS locked per proposal.
     uint256 public immutable bondAmount;
     /// @notice Forfeit destination — the DAO treasury (the timelock).
@@ -74,7 +70,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
     error InvalidBondAmount(uint256 amount);
     error ZeroTreasury();
-    error InvalidQuorumFraction(uint256 numerator, uint256 denominator);
     error BondAlreadyLocked(uint256 proposalId);
     error InsufficientBondReceived();
     error NoBond(uint256 proposalId);
@@ -83,22 +78,19 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
 
     constructor(address governor_, IVotes token_, uint256 quorumNumerator_, uint256 bondAmount_, address treasury_)
         RulesetCounting(governor_)
+        RulesetQuorumFraction(token_, quorumNumerator_)
     {
-        if (quorumNumerator_ > QUORUM_DENOMINATOR) {
-            revert InvalidQuorumFraction(quorumNumerator_, QUORUM_DENOMINATOR);
-        }
-        if (bondAmount_ == 0 || bondAmount_ > type(uint96).max) revert InvalidBondAmount(bondAmount_);
+        if (bondAmount_ == 0) revert InvalidBondAmount(bondAmount_);
         if (treasury_ == address(0)) revert ZeroTreasury();
-        token = token_;
-        quorumNumerator = quorumNumerator_;
         bondAmount = bondAmount_;
         treasury = treasury_;
     }
 
-    /// @notice The bond locked for `proposalId` (zeroed struct if none).
-    function bondOf(uint256 proposalId) external view returns (address proposer, uint96 amount, bool settled) {
+    /// @notice The bond locked for `proposalId` (zeroed if none). Every locked bond holds
+    ///         exactly `bondAmount` — read that immutable for the amount.
+    function bondOf(uint256 proposalId) external view returns (address proposer, bool settled) {
         Bond storage bond = _bonds[proposalId];
-        return (bond.proposer, bond.amount, bond.settled);
+        return (bond.proposer, bond.settled);
     }
 
     /// @notice Per-bucket tallies: Bravo triple plus the slash bucket.
@@ -118,11 +110,6 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     /// @dev The three Bravo options plus AgainstAndSlash.
     function _isValidSupport(uint8 support) internal pure override returns (bool) {
         return support <= uint8(VoteType.AgainstAndSlash);
-    }
-
-    /// @inheritdoc IRuleset
-    function quorum(uint256 timepoint) public view returns (uint256) {
-        return token.getPastTotalSupply(timepoint) * quorumNumerator / QUORUM_DENOMINATOR;
     }
 
     /// @inheritdoc IRuleset
@@ -160,18 +147,16 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
     /// @dev Records the bond then pulls it (checks-effects-interactions); reverts if the token
     ///      delivers less than `bondAmount`, so a fee-on-transfer token can never under-collateralize.
     function validateProposal(
+        uint256 proposalId,
         address proposer,
-        address[] calldata targets,
-        uint256[] calldata values,
-        bytes[] calldata calldatas,
-        bytes32 descriptionHash
+        address[] calldata,
+        uint256[] calldata,
+        bytes[] calldata
     ) external onlyGovernor {
-        uint256 proposalId = uint256(keccak256(abi.encode(targets, values, calldatas, descriptionHash)));
         if (_bonds[proposalId].proposer != address(0)) revert BondAlreadyLocked(proposalId);
 
-        // Effect before interaction (CEI); bondAmount ≤ uint96.max by constructor.
-        // forge-lint: disable-next-line(unsafe-typecast)
-        _bonds[proposalId] = Bond({proposer: proposer, amount: uint96(bondAmount), settled: false});
+        // Effect before interaction (CEI).
+        _bonds[proposalId] = Bond({proposer: proposer, settled: false});
 
         IERC20 erc20 = IERC20(address(token));
         uint256 balanceBefore = erc20.balanceOf(address(this));
@@ -192,65 +177,53 @@ contract BondRuleset is RulesetCounting, IProposalValidator {
         if (bond.proposer == address(0)) revert NoBond(proposalId);
         if (bond.settled) revert BondAlreadySettled(proposalId);
 
-        (address to, SlashReason reason, bool slashed) = _bondResolution(proposalId, bond.proposer);
-        _settle(proposalId, bond, to, reason, slashed);
+        _settle(proposalId, bond, _bondResolution(proposalId));
     }
 
-    /// @dev Maps a terminal proposal state to the bond's destination, reason, and slash flag.
-    ///      Non-terminal states revert, so a refund can never front-run the council's veto window.
-    function _bondResolution(uint256 proposalId, address proposer)
-        private
-        view
-        returns (address to, SlashReason reason, bool slashed)
-    {
+    /// @dev Maps a terminal proposal state to the bond's resolution. `None` refunds the
+    ///      proposer; every other reason forfeits to the treasury — destination and event are
+    ///      derived in `_settle`, so no contradictory (reason, destination) pair is
+    ///      representable. Non-terminal states revert, so a refund can never front-run the
+    ///      council's veto window.
+    function _bondResolution(uint256 proposalId) private view returns (SlashReason) {
         IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
-        if (state == IGovernor.ProposalState.Executed) return (proposer, SlashReason.None, false);
+        if (state == IGovernor.ProposalState.Executed) return SlashReason.None;
         if (state == IGovernor.ProposalState.Defeated) {
-            if (_slashVoted(proposalId, proposer)) return (treasury, SlashReason.SlashVote, true);
-            return (proposer, SlashReason.None, false);
+            return _slashVoted(proposalId) ? SlashReason.SlashVote : SlashReason.None;
         }
-        if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId, proposer);
+        if (state == IGovernor.ProposalState.Canceled) return _canceledBondResolution(proposalId);
         revert BondNotResolvable(proposalId, state);
     }
 
     /// @dev Cancel partition on the recorded cancel timepoint: a self-cancel while still Pending
     ///      (`0 < canceledAt <= snapshot`) refunds; a council veto (no governor-path timepoint,
     ///      `canceledAt == 0`) or a self-cancel after voting opened forfeits.
-    function _canceledBondResolution(uint256 proposalId, address proposer)
-        private
-        view
-        returns (address to, SlashReason reason, bool slashed)
-    {
+    function _canceledBondResolution(uint256 proposalId) private view returns (SlashReason) {
         uint48 canceledAt = IBondGovernor(governor).proposalCanceledAt(proposalId);
-        if (canceledAt == 0) return (treasury, SlashReason.TimelockVeto, true);
-        if (canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) {
-            return (proposer, SlashReason.None, false);
-        }
-        return (treasury, SlashReason.ActiveSelfCancel, true);
+        if (canceledAt == 0) return SlashReason.TimelockVeto;
+        if (canceledAt <= IBondGovernor(governor).proposalSnapshot(proposalId)) return SlashReason.None;
+        return SlashReason.ActiveSelfCancel;
     }
 
-    /// @dev Slash predicate: rejections beat approvals AND, with the proposer's own standing
-    ///      vote removed from both opposition buckets, slash-weight beats plain-No.
-    function _slashVoted(uint256 proposalId, address proposer) private view returns (bool) {
+    /// @dev Slash predicate — the rule the DAO ratified on Snapshot (EP 5.15), applied
+    ///      verbatim on raw tallies: combined rejections strictly beat support AND
+    ///      slash-weight strictly beats plain rejection. Either tie refunds. No per-address
+    ///      scrubbing.
+    function _slashVoted(uint256 proposalId) private view returns (bool) {
         uint256 forVotes = tally(proposalId, uint8(VoteType.For));
         uint256 againstVotes = tally(proposalId, uint8(VoteType.Against));
         uint256 slashVotes = tally(proposalId, uint8(VoteType.AgainstAndSlash));
-        if (againstVotes + slashVotes <= forVotes) return false;
-
-        (bool voted, uint8 support, uint256 weight) = voteReceipt(proposalId, proposer);
-        if (voted) {
-            if (support == uint8(VoteType.Against)) againstVotes -= weight;
-            else if (support == uint8(VoteType.AgainstAndSlash)) slashVotes -= weight;
-        }
-        return slashVotes > againstVotes;
+        return againstVotes + slashVotes > forVotes && slashVotes > againstVotes;
     }
 
-    /// @dev One-shot settle: flag first, single transfer after (CEI).
-    function _settle(uint256 proposalId, Bond storage bond, address to, SlashReason reason, bool slashed) private {
+    /// @dev One-shot settle: flag first, single transfer after (CEI). Destination and event
+    ///      derive from the reason alone — `None` refunds the proposer, anything else
+    ///      forfeits to the treasury.
+    function _settle(uint256 proposalId, Bond storage bond, SlashReason reason) private {
         bond.settled = true;
-        uint256 amount = bond.amount;
-        IERC20(address(token)).safeTransfer(to, amount);
-        if (slashed) emit BondSlashed(proposalId, amount, reason);
-        else emit BondRefunded(proposalId, bond.proposer, amount);
+        bool slashed = reason != SlashReason.None;
+        IERC20(address(token)).safeTransfer(slashed ? treasury : bond.proposer, bondAmount);
+        if (slashed) emit BondSlashed(proposalId, bondAmount, reason);
+        else emit BondRefunded(proposalId, bond.proposer, bondAmount);
     }
 }

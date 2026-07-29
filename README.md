@@ -170,6 +170,18 @@ all-or-nothing) auditable in one place.
   to split voting power across multiple addresses — accepted, consistent with every
   per-address proposal cap in production governance (Bravo/Nouns/Uniswap all share this
   property).
+- **The liveness probe (`_isLive`) is deliberately ruleset-free.** Because the lazy prune
+  runs on *every* propose, a probe that dispatched to the pinned ruleset would let a
+  ruleset with poisoned (reverting) views brick its own proposer's next propose. So the
+  probe reads only core storage: within the original deadline it consults `state()` (which
+  resolves purely from `Pending`/`Active` there), and past the original deadline it decides
+  from the late-flip stage alone — a `None` stage can never extend, so the id is dead;
+  otherwise the id may still sit in its one-shot extension window and is treated as live
+  until `originalDeadline + extensionDuration`. It never calls `_wouldPass` (the only
+  ruleset-dependent path). The cost is a deliberate over-approximation: a `FailingObserved`
+  id that ends up failing holds its slot up to `extensionDuration` longer than strictly
+  necessary, because its true deadline can only be known by asking the ruleset the probe
+  must not call.
 
 ## Optimistic ruleset
 
@@ -257,20 +269,27 @@ Design consequences, accepted deliberately:
 0`, so anyone can propose through it by locking `bondAmount` of ENS — no voting-power gate
 at all. Counting adds a fourth ballot option to the Bravo triple, `AgainstAndSlash`, cast
 through the same vote as any other option. The bond is
-forfeited to the DAO treasury exactly when the vote judges the proposal to be spam, per the
-predicate the DAO ratified on Snapshot:
+forfeited to the DAO treasury exactly when the vote judges the proposal to be spam, per
+the predicate the DAO ratified on Snapshot (EP 5.15), applied verbatim on the raw buckets:
 
 ```
-slashed ⟺ (Against + AgainstAndSlash > For) ∧ (AgainstAndSlash′ > Against′)
+slashed ⟺ (Against + AgainstAndSlash > For) ∧ (AgainstAndSlash > Against)
 ```
 
-where `′` excludes the proposer's own standing vote from the second comparison only — the
-first (defeat) comparison stays the raw buckets. Without the exclusion, a proposer could
-cast a plain `Against` vote on their own proposal to dilute the slash bucket's plurality
-and dodge forfeiture while still losing the vote (the anti-dilution rule); excluding their receipt from that
-one comparison closes it without touching the DAO-ratified rule itself. A `Defeated`
-outcome driven by quorum failure, or a tie (`For == rejections`), never slashes — only a
-clear rejection with slash-plurality does.
+Confiscation fires only when the combined rejections strictly beat support (`For`) AND
+slash-weight strictly beats plain rejection (`Against`); a tie in either comparison
+refunds, and `Abstain` (declared neutrality) neither protects nor punishes. Plain
+rejection is deliberately not a confiscation mandate: a community that votes a proposal
+down without a slash plurality refunds the bond. There is no per-address exclusion of the
+proposer's own vote: the ratified text defines the rule over the raw buckets, and the
+exclusion an earlier revision layered on top (an unratified implementation amendment) was
+removed as ineffective — an address-keyed exclusion is sybil-bypassable, inconveniencing
+only the naive while a second wallet walks around it. Defending a bond with real voting
+weight is design: `Against` weight matching the slash bucket, or `For` weight matching the
+combined rejections, blocks confiscation at real capital cost. There is also deliberately
+no participation floor on the slash bucket: the per-proposer cap is per-address and each
+sybil identity locks a full bond, so a spam wave is bounded by capital, and the DAO must
+be able to slash each spam proposal without gathering a quorum on every one.
 
 Cancellation interacts with the bond through the same partition the cancellation policy
 draws between `Pending` and `Active`:
@@ -298,8 +317,19 @@ Accepted residuals:
 
 - **Whale force-slash.** A large holder can vote `AgainstAndSlash` on an honestly-defeated
   proposal and confiscate the bond at zero marginal cost of their own; the predicate's
-  defeat-plus-plurality bar bounds this but doesn't eliminate it. This is the ratified
-  mandate itself, not an implementation gap.
+  strict comparisons bound this but don't eliminate it. This is the ratified mandate
+  itself, not an implementation gap.
+- **Zero-turnout grief.** With no other votes cast at all, a single wei of
+  `AgainstAndSlash` weight satisfies both comparisons and confiscates an honest proposer's
+  bond. The defense is attracting any single vote in either expressive bucket (`For` or
+  `Against`), each of which the proposer wants anyway. A participation floor was
+  deliberately rejected: it would let a sybil spam wave outrun the DAO's capacity to
+  reach the floor on every spam proposal, neutering the deterrent exactly when it matters.
+- **Whale shield.** The mirror of force-slash: a proposer (or ally) blocks confiscation
+  with real weight — `Against` weight matching the slash bucket, or `For` weight matching
+  the combined rejections — and since voting spends no capital, one whale shields every
+  proposal they back simultaneously. Defense with real voting weight is the design; the
+  whale cases are its two symmetric extremes.
 - **Sybil vs. the bond.** Splitting proposals across multiple identities doesn't reduce
   total cost the way it can against a voting-power threshold: each identity still locks a
   full `bondAmount`, so the bond scales spam cost linearly with proposal count regardless

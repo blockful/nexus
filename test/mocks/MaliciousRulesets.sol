@@ -175,6 +175,56 @@ contract RevertingViewsRuleset is AdversarialRulesetBase {
     }
 }
 
+/// @notice Attack: outcome views behave (report a failing tally) while voting is open, then
+///         revert once `poison()` is flipped — the stateful cousin of {RevertingViewsRuleset}.
+/// @dev Purpose-built for the `_isLive` containment gap. A well-behaved final-window cast can
+///      arm the late-flip `FailingObserved` stage (the views return `false`, not revert), and
+///      only AFTER the deadline does the ruleset turn poisonous. That exact sequence is what
+///      routes a post-deadline liveness probe through `proposalDeadline → _wouldPass → ruleset`.
+///      {RevertingViewsRuleset} cannot reach it: reverting unconditionally, its final-window
+///      casts revert before any stage is armed, so the id stays at stage `None`.
+contract StatefulPoisonRuleset is AdversarialRulesetBase {
+    error ViewPoisoned();
+
+    bool public poisoned;
+
+    mapping(uint256 => mapping(address => bool)) internal _voted;
+
+    constructor(address governor_) AdversarialRulesetBase(governor_) {}
+
+    /// @dev Flip the ruleset poisonous; the test calls this only after the deadline.
+    function poison() external {
+        poisoned = true;
+    }
+
+    /// @inheritdoc IRuleset
+    function countVote(uint256 proposalId, address voter, uint8, uint256 weight, bytes calldata)
+        external
+        returns (uint256)
+    {
+        require(msg.sender == governor, "not governor");
+        _voted[proposalId][voter] = true;
+        return weight; // accepts silently; the views, not the tally, drive the scenario
+    }
+
+    /// @inheritdoc IRuleset
+    function quorumReached(uint256) external view returns (bool) {
+        if (poisoned) revert ViewPoisoned();
+        return false; // failing while open: lets a final-window cast arm FailingObserved
+    }
+
+    /// @inheritdoc IRuleset
+    function voteSucceeded(uint256) external view returns (bool) {
+        if (poisoned) revert ViewPoisoned();
+        return false;
+    }
+
+    /// @inheritdoc IRuleset
+    function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
+        return _voted[proposalId][voter];
+    }
+}
+
 /// @notice Attack: `countVote` returns weight * 1000 (more than it was passed / tallied).
 /// @dev The honest tally still stores the REAL weight; only the RETURN value is inflated. That
 ///      return feeds nothing but the `VoteCast` event's weight field and `castVote`'s return —
