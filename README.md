@@ -298,13 +298,16 @@ draws between `Pending` and `Active`:
 |---|---|
 | Self-cancel while `Pending` | Full refund — no vote existed yet, nothing to evade |
 | Self-cancel while `Active` | Full forfeit — once voting is live, exiting costs as much as losing it |
-| Canceled directly on the timelock (security-council veto) | Full forfeit — the ratified default |
+| Canceled directly on the timelock (security-council veto) | Full forfeit — the ratified default; best-effort since the bond may already be settled (refunds open at `Succeeded`) |
 
-`resolveBond` is permissionless and one-shot, and only ever pays out in a terminal state —
-`Executed`, `Defeated`, or `Canceled`. It reverts in `Succeeded`/`Queued`: those states sit
-inside the security council's timelock-veto window, and an early refund there would let a
-proposer pull their bond out from under a veto before the council acts. A refund on a
-passed proposal is available the moment it executes, and execution is permissionless.
+`resolveBond` is permissionless and one-shot, and pays out as soon as the vote can no
+longer slash — `Succeeded`, `Queued`, `Executed`, `Defeated`, or `Canceled`; only
+`Pending`/`Active` revert. Refunding from `Succeeded` onward is a deliberate product
+decision (2026-08-03): the bond is an anti-spam instrument, and surviving the vote
+fulfills its purpose — a passed proposal's bond is not held hostage to execution. The
+cost is accepted openly: the timelock-veto forfeit below is best-effort, reaching only
+bonds still unsettled when the veto lands — and since resolution is permissionless,
+anyone can settle a passed proposal's bond before a veto arrives.
 
 Every BondRuleset parameter — `token`, `quorumNumerator`, `bondAmount`, `treasury` — is
 `immutable`, with no setters, matching every other ruleset in this repo. 1,000 ENS is
@@ -341,11 +344,10 @@ Accepted residuals:
   per-proposer active-proposal cap (never a victim's — the reentrant proposer is the ruleset
   itself). No reentrancy guard is added: the production `BondRuleset` transfers hook-free
   ENS, and the exposure is bounded to a self-inflicted cap on a governance-approved contract.
-- **Bond stranded by an unexecutable-but-approved proposal.** A proposal that passes but
-  whose on-chain actions always revert on execution never reaches `Executed` (the timelock
-  has no `Expired` state), so it stays in `Queued` and its bond is never released. Accepted:
-  it requires the community to approve a proposal with permanently-reverting calldata, and
-  the stranded bond is the proposer's own.
+- **Veto forfeit evadable by early settle.** Refunds open at `Succeeded`, and resolution
+  is permissionless — so a proposer (or anyone) can settle the bond before the security
+  council vetoes from the timelock, making the veto forfeit reach only bonds still
+  unsettled when the veto lands.
 
 ## Layout
 

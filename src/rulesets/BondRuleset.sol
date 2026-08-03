@@ -27,8 +27,8 @@ interface IBondGovernor {
 ///         after voting opened / vetoed from the timelock.
 /// @dev Immutable by design: no setters. Custody invariant: the ruleset's token
 ///      balance always covers every unsettled bond. Resolution is permissionless and
-///      one-shot; refunds release only in terminal states (`Executed`/`Defeated`/`Canceled`)
-///      so the security council's veto window is never front-run.
+///      one-shot; refunds release once the vote can no longer slash — from `Succeeded`
+///      onward — so the timelock-veto forfeit reaches only bonds still unsettled.
 contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidator {
     using SafeERC20 for IERC20;
 
@@ -169,9 +169,10 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
 
     /// @notice Settles `proposalId`'s bond once its outcome is final. Permissionless and
     ///         one-shot: anyone may trigger settlement, nobody can trigger it twice.
-    /// @dev Refund releases only in terminal states — `Succeeded`/`Queued` revert so the
-    ///      security council's timelock-veto window can never be front-run by an early
-    ///      refund. Effects (settled flag) precede the single transfer (CEI).
+    /// @dev Refunds release from `Succeeded` onward — the bond is an anti-spam instrument
+    ///      and surviving the vote fulfills its purpose; the timelock-veto forfeit reaches
+    ///      only bonds still unsettled when the veto lands. Effects (settled flag) precede
+    ///      the single transfer (CEI).
     function resolveBond(uint256 proposalId) external {
         Bond storage bond = _bonds[proposalId];
         if (bond.proposer == address(0)) revert NoBond(proposalId);
@@ -180,14 +181,19 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
         _settle(proposalId, bond, _bondResolution(proposalId));
     }
 
-    /// @dev Maps a terminal proposal state to the bond's resolution. `None` refunds the
+    /// @dev Maps a resolvable proposal state to the bond's resolution. `None` refunds the
     ///      proposer; every other reason forfeits to the treasury — destination and event are
     ///      derived in `_settle`, so no contradictory (reason, destination) pair is
-    ///      representable. Non-terminal states revert, so a refund can never front-run the
-    ///      council's veto window.
+    ///      representable. Only `Pending`/`Active` revert: while the vote is live the
+    ///      slash outcome is still undecided, so nothing may settle.
     function _bondResolution(uint256 proposalId) private view returns (SlashReason) {
         IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
-        if (state == IGovernor.ProposalState.Executed) return SlashReason.None;
+        if (
+            state == IGovernor.ProposalState.Succeeded || state == IGovernor.ProposalState.Queued
+                || state == IGovernor.ProposalState.Executed
+        ) {
+            return SlashReason.None;
+        }
         if (state == IGovernor.ProposalState.Defeated) {
             return _slashVoted(proposalId) ? SlashReason.SlashVote : SlashReason.None;
         }
