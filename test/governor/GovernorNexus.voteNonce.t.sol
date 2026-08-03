@@ -4,6 +4,7 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {Box} from "../mocks/Box.sol";
+import {MockERC1271Wallet} from "../mocks/MockERC1271Wallet.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Per-proposal ballot nonce suite. `voteNonce(proposalId, account)` scopes signed-ballot
@@ -218,5 +219,42 @@ contract GovernorNexusVoteNonceTest is GovernorNexusTestBase {
         bytes memory stale = _signExtendedBallot(idB, 0, signer, signerKey, 0, "stale", "");
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
         governor.castVoteWithReasonAndParamsBySig(idB, 0, signer, "stale", "", stale);
+    }
+
+    // ─────────────────────────── ERC-1271 contract-signer coverage ───────────────────────────
+
+    /// @dev A ballot signed by the wallet's EOA owner validates through the ERC-1271 branch of
+    ///      `SignatureChecker` and bumps the contract voter's per-proposal nonce.
+    function test_castVoteBySig_erc1271Wallet_validatesAndBumpsNonce() public {
+        (address owner, uint256 ownerKey) = makeAddrAndKey("walletOwner");
+        MockERC1271Wallet wallet = new MockERC1271Wallet(owner);
+        _fund(address(wallet), 30e18);
+        vm.roll(block.number + 1);
+
+        uint256 id = _proposeActive(1, "erc1271 wallet vote");
+
+        bytes memory ballot = _signBallot(id, 1, address(wallet), ownerKey, governor.voteNonce(id, address(wallet)));
+        governor.castVoteBySig(id, 1, address(wallet), ballot);
+
+        assertEq(governor.voteNonce(id, address(wallet)), 1, "wallet's per-proposal nonce bumped");
+        (, uint256 forVotes,) = standardRuleset.proposalVotes(id);
+        assertEq(forVotes, 30e18, "wallet ballot counted");
+    }
+
+    /// @dev Replaying that same ERC-1271-validated ballot fails: the nonce it was built
+    ///      against is already spent.
+    function test_castVoteBySig_erc1271Wallet_replayReverts() public {
+        (address owner, uint256 ownerKey) = makeAddrAndKey("walletOwner");
+        MockERC1271Wallet wallet = new MockERC1271Wallet(owner);
+        _fund(address(wallet), 30e18);
+        vm.roll(block.number + 1);
+
+        uint256 id = _proposeActive(1, "erc1271 wallet replay");
+
+        bytes memory ballot = _signBallot(id, 1, address(wallet), ownerKey, governor.voteNonce(id, address(wallet)));
+        governor.castVoteBySig(id, 1, address(wallet), ballot);
+
+        vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, address(wallet)));
+        governor.castVoteBySig(id, 1, address(wallet), ballot);
     }
 }

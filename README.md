@@ -112,7 +112,9 @@ Two consequences follow for integrators:
   signature once the voter acts on that proposal. Ballots must be built with
   `voteNonce(proposalId, account)` — the account-global `nonces(address)` inherited from OZ is
   not used for ballots and stays 0 (OZ-standard tooling that reads it still produces valid
-  signatures for a voter's first cast on a proposal, since both counters start at 0).
+  signatures for a voter's first cast on a proposal, since both counters start at 0). For any
+  later cast on that proposal, a ballot built from `nonces(address)` reverts with
+  `GovernorInvalidSignature` — relayers must read `voteNonce`.
 
 ## Anti-snipe late-vote extension
 

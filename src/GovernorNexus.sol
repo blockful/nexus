@@ -523,9 +523,11 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
     }
 
     /// @dev Ballot digest bound to the per-proposal nonce — a read, not a spend; the spend
-    ///      happens in `_castVote` when the vote is applied.
+    ///      happens in `_castVote` when the vote is applied. Tightened to `view` (the OZ base
+    ///      is nonpayable because it spends a nonce; this override only reads).
     function _validateVoteSig(uint256 proposalId, uint8 support, address voter, bytes memory signature)
         internal
+        view
         virtual
         override
         returns (bool)
@@ -533,7 +535,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         return SignatureChecker.isValidSignatureNow(
             voter,
             _hashTypedDataV4(
-                keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support, voter, _voteNonces[proposalId][voter]))
+                keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support, voter, voteNonce(proposalId, voter)))
             ),
             signature
         );
@@ -547,7 +549,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         string memory reason,
         bytes memory params,
         bytes memory signature
-    ) internal virtual override returns (bool) {
+    ) internal view virtual override returns (bool) {
         return SignatureChecker.isValidSignatureNow(
             voter,
             _hashTypedDataV4(
@@ -557,7 +559,7 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
                         proposalId,
                         support,
                         voter,
-                        _voteNonces[proposalId][voter],
+                        voteNonce(proposalId, voter),
                         keccak256(bytes(reason)),
                         keccak256(params)
                     )
@@ -582,17 +584,20 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     /// @dev Every cast path converges here; spending the per-proposal ballot nonce on each
     ///      applied cast is what invalidates outstanding signed ballots for this proposal.
+    ///      Spent BEFORE `super._castVote` dispatches to the ruleset's external `countVote`,
+    ///      so the in-flight signature is already dead during that call; a revert unwinds
+    ///      the spend and the cast atomically either way.
     function _castVote(uint256 proposalId, address account, uint8 support, string memory reason, bytes memory params)
         internal
         virtual
         override(Governor, GovernorPreventLateFlip)
         returns (uint256 weight)
     {
-        weight = super._castVote(proposalId, account, support, reason, params);
-        // Increment-only, +1 per cast: cannot realistically overflow (same argument as OZ Nonces).
+        // Increment-only, +1 per cast: cannot realistically overflow.
         unchecked {
             ++_voteNonces[proposalId][account];
         }
+        weight = super._castVote(proposalId, account, support, reason, params);
     }
 
     function _tallyUpdated(uint256 proposalId) internal virtual override(Governor, GovernorPreventLateFlip) {
