@@ -347,11 +347,7 @@ Accepted residuals:
 - **Veto forfeit evadable by early settle.** Refunds open at `Succeeded`, and resolution
   is permissionless — so a proposer (or anyone) can settle the bond before the security
   council vetoes from the timelock, making the veto forfeit reach only bonds still
-  unsettled when the veto lands. Accepted as a product decision (2026-08-03): the bond
-  deters spam, and a proposal that survived the vote is not spam; the veto answers
-  malicious payloads, which the bond was never sized to deter. The same change dissolves
-  the old stranded-bond residual (a passed-but-unexecutable proposal no longer locks its
-  bond forever).
+  unsettled when the veto lands.
 
 ## Layout
 
