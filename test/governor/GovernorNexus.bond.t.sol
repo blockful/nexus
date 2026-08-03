@@ -9,7 +9,7 @@ import {BondRulesetTestBase} from "../rulesets/BondRulesetTestBase.sol";
 
 /// @dev Integration suite for `resolveBond` against the real `GovernorNexus` + timelock —
 ///      the ratified spam-slash predicate (EP 5.15 verbatim: combined rejections strictly
-///      beat For AND slash-weight strictly beats plain Against) and the terminal-states-only
+///      beat For AND slash-weight strictly beats plain Against) and the Pending/Active-only
 ///      guard, each exercised end to end through the actual propose → vote → queue/execute/
 ///      cancel lifecycle rather than a mocked governor.
 contract GovernorNexusBondTest is BondRulesetTestBase {
@@ -420,7 +420,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         bondRuleset.resolveBond(id);
     }
 
-    function test_resolve_revertsWhileQueued() public {
+    function test_resolve_refundsWhileQueued() public {
         address[] memory t;
         uint256[] memory v;
         bytes[] memory c;
@@ -432,10 +432,100 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         governor.castVote(id, uint8(BondRuleset.VoteType.For));
         vm.roll(governor.proposalDeadline(id) + 1);
         governor.queue(t, v, c, h);
-        vm.expectRevert(
-            abi.encodeWithSelector(BondRuleset.BondNotResolvable.selector, id, IGovernor.ProposalState.Queued)
-        );
-        bondRuleset.resolveBond(id); // veto window open — no early refund
+
+        uint256 before = token.balanceOf(bob);
+        vm.expectEmit(true, true, false, true);
+        emit BondRuleset.BondRefunded(id, bob, BOND_AMOUNT);
+        bondRuleset.resolveBond(id); // veto window still open — early refund is the accepted trade-off
+        assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+        (, bool settled) = bondRuleset.bondOf(id);
+        assertTrue(settled);
+    }
+
+    function test_resolve_refundsWhileSucceeded() public {
+        (uint256 id,,,,) = _proposeBonded("succeeded refund");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Succeeded));
+
+        uint256 before = token.balanceOf(bob);
+        vm.expectEmit(true, true, false, true);
+        emit BondRuleset.BondRefunded(id, bob, BOND_AMOUNT);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
+    }
+
+    /// @dev Anyone may trigger the early refund; funds always go to the proposer.
+    function test_resolve_thirdPartyTriggersEarlyRefund_fundsGoToProposer() public {
+        (uint256 id,,,,) = _proposeBonded("stranger settles");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.roll(governor.proposalDeadline(id) + 1);
+
+        uint256 strangerBefore = token.balanceOf(eoa);
+        uint256 proposerBefore = token.balanceOf(bob);
+        vm.prank(eoa);
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(bob), proposerBefore + BOND_AMOUNT);
+        assertEq(token.balanceOf(eoa), strangerBefore);
+    }
+
+    /// @dev Early settle at Succeeded, then the proposal queues and executes normally —
+    ///      resolution replay reverts, no double payout.
+    function test_resolve_earlySettleThenExecute_replayReverts() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("settle then execute");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.roll(governor.proposalDeadline(id) + 1);
+
+        bondRuleset.resolveBond(id); // refund at Succeeded
+
+        governor.queue(t, v, c, h);
+        vm.warp(block.timestamp + TIMELOCK_DELAY + 1);
+        governor.execute(t, v, c, h); // lifecycle unaffected by the settled bond
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Executed));
+
+        vm.expectRevert(abi.encodeWithSelector(BondRuleset.BondAlreadySettled.selector, id));
+        bondRuleset.resolveBond(id);
+    }
+
+    /// @dev The accepted trade-off, pinned: bond settled while Queued, council vetoes
+    ///      after — the forfeit is unreachable (replay reverts), the veto itself still lands.
+    function test_resolve_earlySettleThenVeto_noForfeit() public {
+        address[] memory t;
+        uint256[] memory v;
+        bytes[] memory c;
+        bytes32 h;
+        uint256 id;
+        (id, t, v, c, h) = _proposeBonded("settle then veto");
+        vm.roll(governor.proposalSnapshot(id) + 1);
+        vm.prank(alice);
+        governor.castVote(id, uint8(BondRuleset.VoteType.For));
+        vm.roll(governor.proposalDeadline(id) + 1);
+        governor.queue(t, v, c, h);
+
+        bondRuleset.resolveBond(id); // refund at Queued, before the veto
+
+        bytes32 salt = bytes20(address(governor)) ^ h;
+        bytes32 opId = timelock.hashOperationBatch(t, v, c, 0, salt);
+        vm.prank(council);
+        timelock.cancel(opId);
+        assertEq(uint8(governor.state(id)), uint8(IGovernor.ProposalState.Canceled));
+        assertEq(governor.proposalCanceledAt(id), 0);
+
+        uint256 treasuryBefore = token.balanceOf(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(BondRuleset.BondAlreadySettled.selector, id));
+        bondRuleset.resolveBond(id);
+        assertEq(token.balanceOf(address(timelock)), treasuryBefore); // forfeit never happens
     }
 
     function test_resolve_replayReverts() public {
