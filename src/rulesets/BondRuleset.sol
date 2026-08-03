@@ -188,8 +188,10 @@ contract BondRuleset is RulesetCounting, RulesetQuorumFraction, IProposalValidat
     ///      slash outcome is still undecided, so nothing may settle.
     function _bondResolution(uint256 proposalId) private view returns (SlashReason) {
         IGovernor.ProposalState state = IBondGovernor(governor).state(proposalId);
-        if (state == IGovernor.ProposalState.Executed) return SlashReason.None;
-        if (state == IGovernor.ProposalState.Succeeded || state == IGovernor.ProposalState.Queued) {
+        if (
+            state == IGovernor.ProposalState.Succeeded || state == IGovernor.ProposalState.Queued
+                || state == IGovernor.ProposalState.Executed
+        ) {
             return SlashReason.None;
         }
         if (state == IGovernor.ProposalState.Defeated) {
