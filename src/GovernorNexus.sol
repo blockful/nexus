@@ -8,6 +8,7 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
 import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
 import {IProposalValidator} from "./interfaces/IProposalValidator.sol";
@@ -49,6 +50,10 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
 
     /// @dev Timepoint of the governor-path cancel, 0 if never canceled through the governor.
     mapping(uint256 proposalId => uint48) private _canceledAt;
+
+    /// @dev Per-proposal EIP-712 ballot nonces. Vote signatures validate against this,
+    ///      not the inherited account-global `Nonces` (which stays orphaned at 0).
+    mapping(uint256 proposalId => mapping(address voter => uint256)) private _voteNonces;
 
     /// @dev Ids of the proposer's tracked proposals, lazily pruned on their next propose.
     ///      An id is pushed only after {_pruneAndCheckActiveLimit} passes, so length is
@@ -502,40 +507,64 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         return _rulesetOf(proposalId).countVote(proposalId, account, support, totalWeight, params);
     }
 
-    // ─────────────────────────── Direct-vote nonce spend ───────────────────────────
+    // ─────────────────────────── Per-proposal ballot nonce ───────────────────────────
     // Under mutable votes the last-applied cast wins, so an outstanding signed ballot could
-    // be submitted AFTER a direct vote and override it. OZ spends the EIP-712 vote nonce
-    // only on the `bySig` paths; these overrides spend it on every direct cast too, so
-    // acting directly invalidates any outstanding signed ballot. The nonce is
-    // account-global: one direct vote invalidates the voter's pending vote-signatures
-    // across all open proposals.
+    // be submitted AFTER a later cast and override it. Every applied cast (direct, bySig,
+    // or batch item) spends the (proposalId, voter) nonce in `_castVote`, and signatures
+    // validate against the current value — so a cast invalidates the voter's outstanding
+    // signed ballots for THAT proposal only. The account-global `Nonces` inherited through
+    // OZ `Governor` is never spent and stays 0.
 
-    /// @inheritdoc IGovernor
-    function castVote(uint256 proposalId, uint8 support) public virtual override returns (uint256) {
-        _useNonce(_msgSender());
-        return super.castVote(proposalId, support);
+    /// @notice Next expected EIP-712 ballot nonce for `account` on `proposalId`.
+    /// @dev Source of truth for building vote signatures; increments on every applied cast.
+    ///      The inherited `nonces(address)` is NOT used for ballots.
+    function voteNonce(uint256 proposalId, address account) public view virtual returns (uint256) {
+        return _voteNonces[proposalId][account];
     }
 
-    /// @inheritdoc IGovernor
-    function castVoteWithReason(uint256 proposalId, uint8 support, string calldata reason)
-        public
+    /// @dev Ballot digest bound to the per-proposal nonce — a read, not a spend; the spend
+    ///      happens in `_castVote` when the vote is applied.
+    function _validateVoteSig(uint256 proposalId, uint8 support, address voter, bytes memory signature)
+        internal
         virtual
         override
-        returns (uint256)
+        returns (bool)
     {
-        _useNonce(_msgSender());
-        return super.castVoteWithReason(proposalId, support, reason);
+        return SignatureChecker.isValidSignatureNow(
+            voter,
+            _hashTypedDataV4(
+                keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support, voter, _voteNonces[proposalId][voter]))
+            ),
+            signature
+        );
     }
 
-    /// @inheritdoc IGovernor
-    function castVoteWithReasonAndParams(uint256 proposalId, uint8 support, string calldata reason, bytes memory params)
-        public
-        virtual
-        override
-        returns (uint256)
-    {
-        _useNonce(_msgSender());
-        return super.castVoteWithReasonAndParams(proposalId, support, reason, params);
+    /// @dev Extended-ballot digest bound to the per-proposal nonce; see {_validateVoteSig}.
+    function _validateExtendedVoteSig(
+        uint256 proposalId,
+        uint8 support,
+        address voter,
+        string memory reason,
+        bytes memory params,
+        bytes memory signature
+    ) internal virtual override returns (bool) {
+        return SignatureChecker.isValidSignatureNow(
+            voter,
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        EXTENDED_BALLOT_TYPEHASH,
+                        proposalId,
+                        support,
+                        voter,
+                        _voteNonces[proposalId][voter],
+                        keccak256(bytes(reason)),
+                        keccak256(params)
+                    )
+                )
+            ),
+            signature
+        );
     }
 
     // ──────────────── Governor / extension overrides (pure disambiguation) ────────────────
@@ -551,13 +580,19 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         return super.proposalDeadline(proposalId);
     }
 
+    /// @dev Every cast path converges here; spending the per-proposal ballot nonce on each
+    ///      applied cast is what invalidates outstanding signed ballots for this proposal.
     function _castVote(uint256 proposalId, address account, uint8 support, string memory reason, bytes memory params)
         internal
         virtual
         override(Governor, GovernorPreventLateFlip)
-        returns (uint256)
+        returns (uint256 weight)
     {
-        return super._castVote(proposalId, account, support, reason, params);
+        weight = super._castVote(proposalId, account, support, reason, params);
+        // Increment-only, +1 per cast: cannot realistically overflow (same argument as OZ Nonces).
+        unchecked {
+            ++_voteNonces[proposalId][account];
+        }
     }
 
     function _tallyUpdated(uint256 proposalId) internal virtual override(Governor, GovernorPreventLateFlip) {
@@ -584,10 +619,6 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, Gove
         }
 
         address voter = _msgSender();
-
-        // A batch is a direct cast — one account-global nonce spend invalidates any
-        // outstanding signed ballot.
-        _useNonce(voter);
 
         weights = new uint256[](n);
         for (uint256 i = 0; i < n; ++i) {
