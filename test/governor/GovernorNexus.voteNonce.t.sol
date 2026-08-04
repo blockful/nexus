@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 
 import {Box} from "../mocks/Box.sol";
-import {MockERC1271Wallet} from "../mocks/MockERC1271Wallet.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Per-proposal ballot nonce suite. `voteNonce(proposalId, account)` scopes signed-ballot
