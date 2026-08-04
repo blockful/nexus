@@ -105,10 +105,16 @@ Two consequences follow for integrators:
   the crossing that matters. Mechanisms needing finality (e.g. the anti-snipe extension below)
   evaluate the outcome at the deadline, bar re-votes inside their own window, or gate
   early finality.
-- **Gasless relayers:** a direct `castVote*` spends the voter's EIP-712 nonce, so voting directly
-  invalidates any of that voter's outstanding signed ballots (across all open proposals — the
-  nonce is per-account). A stale pre-signed ballot therefore cannot override a later direct vote
-  under mutable votes; a relayer needs a fresh signature once the voter acts directly.
+- **Gasless relayers:** every applied cast spends the voter's **per-proposal** EIP-712 ballot
+  nonce, so voting directly invalidates the voter's outstanding signed ballots **for that
+  proposal only** — held signatures for other open proposals stay valid. A stale pre-signed
+  ballot therefore cannot override a later cast on the same proposal; a relayer needs a fresh
+  signature once the voter acts on that proposal. Ballots must be built with
+  `voteNonce(proposalId, account)` — the account-global `nonces(address)` inherited from OZ is
+  not used for ballots and stays 0 (OZ-standard tooling that reads it still produces valid
+  signatures for a voter's first cast on a proposal, since both counters start at 0). For any
+  later cast on that proposal, a ballot built from `nonces(address)` reverts with
+  `GovernorInvalidSignature` — relayers must read `voteNonce`.
 
 ## Anti-snipe late-vote extension
 
@@ -139,15 +145,14 @@ Integrator notes:
 ## Batch voting
 
 `castVoteWithReasonAndParamsBatch` casts votes on several proposals in one transaction,
-all-or-nothing. A batch is a direct cast: it spends the voter's nonce once, so — like any
-direct vote — it invalidates the voter's outstanding signed ballots across all open
-proposals. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
+all-or-nothing. A batch is a direct cast: each item spends the voter's ballot nonce on that item's proposal, so — like any
+direct vote — it invalidates the voter's outstanding signed ballots for exactly the proposals voted in the batch. Duplicate ids inside a batch are ordinary re-votes, last-wins. Empty
 `reasons[i]`/`params[i]` entries mean "none" — OZ emits `VoteCast` for empty params and
 `VoteCastWithParams` otherwise.
 
 Batching is an explicit function rather than OZ's `Multicall` mixin: the governor's payable
 surface (`execute`/`relay`/`receive`) is exactly what makes Multicall the msg.value-reuse
-bug class, and an explicit signature keeps the batch semantics (single nonce spend,
+bug class, and an explicit signature keeps the batch semantics (per-item nonce spend,
 all-or-nothing) auditable in one place.
 
 ## Spam limit
@@ -415,7 +420,7 @@ governance to **Stage 1**.
 | No late-vote extension — last-minute flips can pass without response time | **Medium** | Anti-snipe extension: a failing→passing flip in the final 24h extends voting by 48h |
 | Routine operations require a full governance vote | **Low** | Optimistic pass-unless-vetoed type, gated by proposer/action allowlists |
 | Uniform approval thresholds for every proposal class | **Low** | Per-type thresholds and quorum via the ruleset registry |
-| High operational friction for delegates under proposal load | QoL | Batch voting — many proposals, one transaction, one nonce spend |
+| High operational friction for delegates under proposal load | QoL | Batch voting — many proposals, one transaction |
 | Proposing requires 100k ENS of voting power, full stop | QoL | Bond ruleset — lock 1,000 ENS instead, slashed only under the DAO-ratified spam predicate |
 
 ### Gas benchmarks
@@ -430,6 +435,6 @@ setup/fixture cost. Reference numbers at block 25,445,220 (regenerate with
 | op | live gov | GovernorNexus | delta | attribution |
 |---|---:|---:|---:|---|
 | propose | 115,052 | 139,441 | +24,389 | Type-pin SSTORE + transient-context writes + the extra `ProposalTypedCreated` event, plus the spam-limit bookkeeping (active-set append + lazy prune) and the propose-time validation hook — partially offset by OZ v5's packed `ProposalCore` beating the live governor's storage layout. |
-| castVote | 106,982 | 135,831 | +28,849 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE), the anti-snipe low-water evaluation around the cast (outcome views call back into the governor and out to the token), and the vote-nonce spend on direct casts. |
+| castVote | 106,982 | 135,831 | +28,849 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE), the anti-snipe low-water evaluation around the cast (outcome views call back into the governor and out to the token), and the per-proposal ballot-nonce spend on every applied cast. |
 | queue | 102,244 | 121,931 | +19,687 | `queue()`'s state-bitmap check re-derives quorum/success by calling out to the ruleset, which itself calls back into the governor (`proposalSnapshot`) and out to the token (`getPastTotalSupply`) — a multi-hop CALL chain the live governor's local tally doesn't pay. |
 | execute | 79,188 | 61,606 | -17,582 | Net cheaper; `execute()`'s state check re-runs the same ruleset CALL chain as `queue()`, so the sign flip is attributed to the live governor's own (opaque, bytecode-only) execute-path bookkeeping rather than anything ruleset-side. |

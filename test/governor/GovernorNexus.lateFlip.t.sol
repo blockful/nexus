@@ -330,8 +330,8 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
 
     // ─────────────────────── cast-path coverage: bySig ───────────────────────
 
-    /// @dev The hooks live on the internal `_castVote`, so the sig paths (which skip the
-    ///      public `castVote*` overrides) are covered too: a bySig flip inside the window
+    /// @dev The hooks live on the internal `_castVote`, so the sig paths (the per-proposal
+    ///      nonce spend in `_castVote`) are covered too: a bySig flip inside the window
     ///      extends.
     function test_castVoteBySig_insideWindow_triggersExtension() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
@@ -342,7 +342,7 @@ contract GovernorNexusLateFlipTest is GovernorNexusTestBase {
         _vote(alice, id, 0); // failing
 
         vm.roll(t - 10);
-        bytes memory ballot = _signBallot(id, 1, signer, signerKey, governor.nonces(signer));
+        bytes memory ballot = _signBallot(id, 1, signer, signerKey, governor.voteNonce(id, signer));
         governor.castVoteBySig(id, 1, signer, ballot); // flip through the sig path
 
         vm.roll(t + 1);

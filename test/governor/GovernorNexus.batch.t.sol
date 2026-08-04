@@ -14,7 +14,8 @@ import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 ///      alice (2_000_000e18) proposes; carol (30e18) is the batch voter, so most weight
 ///      assertions read 30e18 — except test_castVoteWithReasonAndParamsBatch_weightsFollowEachProposalsSnapshot,
 ///      which tops carol up mid-suite to prove per-item snapshot reads diverge. All-or-nothing
-///      semantics, one nonce spend per batch, duplicates are intra-tx re-votes.
+///      semantics, one ballot-nonce spend per batch item on that item's proposal, duplicates
+///      are intra-tx re-votes.
 contract GovernorNexusBatchTest is GovernorNexusTestBase {
     address internal carol = makeAddr("carol");
     Box internal box;
@@ -154,11 +155,10 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
     // ─────────────────────────── 3. Nonce spend ───────────────────────────
 
-    /// @dev A batch is a direct cast: it must invalidate the voter's outstanding signed
-    ///      ballots, exactly like the single-vote nonce-spending overrides. Without this,
-    ///      the batch path reintroduces the stale-ballot override: a relayer could land a
-    ///      previously signed ballot on top of the voter's later direct vote.
-    function test_castVoteWithReasonAndParamsBatch_invalidatesOutstandingSignedBallot() public {
+    /// @dev A batch is a direct cast: each item spends the (proposal, voter) ballot nonce,
+    ///      so a batch invalidates the voter's outstanding signed ballots for exactly the
+    ///      proposals it voted — a held ballot on an unbatched proposal survives.
+    function test_castVoteWithReasonAndParamsBatch_invalidatesOnlyBatchedProposalsBallots() public {
         (address signer, uint256 signerKey) = makeAddrAndKey("signer");
         _fund(signer, 30e18);
         vm.roll(block.number + 1);
@@ -166,9 +166,9 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         uint256 p1 = _proposeActive(1, "batched direct vote", 0);
         uint256 p2 = _proposeActive(2, "held ballot", 0);
 
-        // Signer hands a relayer a For ballot on p2, then changes their mind and
-        // batch-votes (on p1 only — the nonce is account-global).
-        bytes memory pendingFor = _signBallot(p2, 1, signer, signerKey, governor.nonces(signer));
+        // Signer hands a relayer ballots on p1 and p2, then batch-votes on p1 only.
+        bytes memory pendingP1 = _signBallot(p1, 1, signer, signerKey, governor.voteNonce(p1, signer));
+        bytes memory pendingP2 = _signBallot(p2, 1, signer, signerKey, governor.voteNonce(p2, signer));
 
         uint256[] memory ids = new uint256[](1);
         ids[0] = p1;
@@ -178,9 +178,12 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         vm.prank(signer);
         governor.castVoteWithReasonAndParamsBatch(ids, supportValues, reasons, params);
 
-        // The outstanding ballot died with the batch.
+        // The p1 ballot died with the batch item on p1…
         vm.expectRevert(abi.encodeWithSelector(IGovernor.GovernorInvalidSignature.selector, signer));
-        governor.castVoteBySig(p2, 1, signer, pendingFor);
+        governor.castVoteBySig(p1, 1, signer, pendingP1);
+
+        // …but the held p2 ballot survives: the batch never voted p2.
+        governor.castVoteBySig(p2, 1, signer, pendingP2);
     }
 
     function _signBallot(uint256 proposalId, uint8 support, address voter, uint256 key, uint256 nonce)
@@ -381,12 +384,11 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
         }
     }
 
-    /// @dev In-EVM gas comparison. The batch saves (N-1) nonce bumps (one spend per batch
-    ///      vs one per single cast) in-EVM, but the measured in-EVM delta can be slightly
-    ///      negative (array ABI-decoding overhead can exceed those saved nonce bumps) — the
-    ///      assertion below is intrinsic-adjusted, crediting the (N-1) avoided per-tx 21k
-    ///      intrinsic costs that a single-EVM-call harness cannot otherwise see. Real-world
-    ///      savings (avoided top-level calldata too) are larger than reported here.
+    /// @dev In-EVM gas comparison. Batch and singles now perform the same per-proposal
+    ///      nonce spends, so in-EVM the batch only saves warm-vs-cold access differences and
+    ///      can measure slightly negative (array ABI-decoding overhead). The real saving is
+    ///      off-EVM: (N-1) avoided per-tx 21k intrinsic costs plus top-level calldata — the
+    ///      assertion below is intrinsic-adjusted to credit that.
     function test_castVoteWithReasonAndParamsBatch_gasComparedToSingles() public {
         uint256[] memory ids = new uint256[](5);
         uint8[] memory supportValues = new uint8[](5);
@@ -414,8 +416,8 @@ contract GovernorNexusBatchTest is GovernorNexusTestBase {
 
         console2.log("batch(5) gas:", batchGas);
         console2.log("5 singles gas:", singlesGas);
-        // In-EVM, a batch can cost slightly MORE than N singles (array ABI-decoding overhead
-        // exceeds the (N-1) saved nonce bumps). The real saving is off-EVM: (N-1) avoided
+        // In-EVM, a batch can cost slightly MORE than N singles (array ABI-decoding overhead,
+        // no in-EVM spend savings). The real saving is off-EVM: (N-1) avoided
         // per-tx intrinsic costs (21k each) + top-level calldata. Assert the real-world win
         // with the intrinsic adjustment; the logs above report the exact numbers.
         assertLt(batchGas, singlesGas + 4 * 21_000, "batch must beat 5 singles once avoided intrinsic gas is counted");
