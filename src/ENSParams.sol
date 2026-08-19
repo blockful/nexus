@@ -20,9 +20,7 @@ library ENSParams {
     // so numerator 1 encodes the same 1%.
     uint256 internal constant QUORUM_NUMERATOR = 1;
 
-    // Intended ENS registration values for the additional rulesets — not read from the
-    // live governor (it has neither mechanism): the DAO-ratified proposal bond (EP 5.15)
-    // and the optimistic ruleset's absolute veto threshold.
+    // Intended ENS registration values for the additional rulesets.
     uint256 internal constant BOND_AMOUNT = 1_000e18; // 1,000 ENS
     uint256 internal constant VETO_THRESHOLD = 500_000e18; // 500k ENS
 
