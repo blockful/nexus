@@ -1,4 +1,4 @@
-# nexus
+# Governor Nexus
 
 Production implementation of **Governor Nexus** — blockful's modular security upgrade
 for ENS governance ([RFC](https://discuss.ens.domains/t/rfc-governor-nexus-modular-security-upgrade-for-ens-governance/21942)).
@@ -209,8 +209,8 @@ target — the governor, the timelock, and the ruleset itself — so a zero-vote
 never reconfigure the system that created it.
 
 The propose-time hook is the core's one addition: a ruleset advertising
-`IProposalValidator` via ERC165 has `validateProposal(proposer, targets, values,
-calldatas)` called before the proposal is created, and a revert blocks creation.
+`IProposalValidator` via ERC165 has `validateProposal(proposalId, proposer, targets,
+values, calldatas)` called before the proposal is created, and a revert blocks creation.
 Detection happens once, at `registerType`, pinned as `hasProposalValidation` on the content-immutable
 type line and never re-queried — types whose rulesets don't opt in keep a byte-identical
 propose path. A misbehaving validator can only brick proposing its own type (a revert
@@ -237,8 +237,11 @@ replaces that (via the `_validateCancel` hook — no fork): **cancellation is po
 while the proposal is `Pending` or `Active`** — once the voting process finishes, no one
 can cancel, in any state — and within that window two rules apply:
 
-- **Self-cancel:** the proposer can always cancel their own proposal, recovering from
-  mistakes without burning a full voting cycle.
+- **Self-cancel:** the proposer can cancel their own proposal at any point after the
+  propose block, recovering from mistakes without burning a full voting cycle. The
+  propose-block bar is deliberate: it makes the atomic propose→cancel round-trip
+  unrepresentable, so a flash-borrowed bond can never enter and leave custody inside
+  one transaction.
 - **Continuous threshold:** the propose-time threshold is a standing obligation. If the
   proposer's voting power drops below the **pinned type's** `proposalThreshold`, `cancel()`
   becomes permissionless — anyone can kill the proposal while it is still votable. Types
@@ -362,17 +365,20 @@ Accepted residuals:
 | `src/GovernorPreventLateFlip.sol` | **Anti-snipe extension**, an abstract Governor module (window low-water mark, lazy deadline extension) — reusable by any OZ v5 governor, hardened for mutable votes |
 | `src/interfaces/IRuleset.sol` | Interface a pluggable ruleset implements (counting, quorum, vote success) |
 | `src/RulesetCounting.sol` | Counting base every ruleset inherits — Bravo buckets, per-voter receipts, **mutable votes** (a re-vote replaces the standing vote) |
+| `src/RulesetQuorumFraction.sol` | Shared fractional-quorum base — `pastTotalSupply × numerator / 100`; which buckets count stays in the inheriting ruleset |
 | `src/rulesets/StandardRuleset.sol` | Bootstrap ruleset — live-ENS-parity quorum/success rules on top of the counting base |
-| `src/interfaces/IProposalValidator.sol` | Optional ruleset extension — propose-time content-validation hook (carries `descriptionHash`), ERC165-detected at registration; drives the optimistic gate and `BondRuleset`'s bond lock |
+| `src/interfaces/IProposalValidator.sol` | Optional ruleset extension — propose-time content-validation hook (carries the governor-computed `proposalId`), ERC165-detected at registration; drives the optimistic gate and `BondRuleset`'s bond lock |
 | `src/rulesets/OptimisticRuleset.sol` | Optimistic ruleset — pass-unless-vetoed outcome + propose-time proposer/action allowlists |
 | `src/rulesets/BondRuleset.sol` | **Lock-to-propose ruleset** — fourth ballot option, bond custody (lock/refund/forfeit), spam-slash predicate |
-| `src/ENSParams.sol` | Live ENS addresses + current governor parameters (single source of truth) |
+| `src/ENSParams.sol` | Live ENS addresses, current governor parameters, and the intended registration values for the new rulesets (single source of truth) |
 | `script/Deploy.s.sol` | Deploys `StandardRuleset` + `GovernorNexus` (two-contract, CREATE-address-precompute deploy) against the real ENS token + timelock |
 | `test/governor/GovernorNexus.registry.t.sol` | Unit suite: type registration, activation, default-pointer moves |
 | `test/governor/GovernorNexus.propose.t.sol` | Unit suite: both propose doors, type pinning, per-type parameters |
 | `test/governor/GovernorNexus.lifecycle.t.sol` | Unit suite: full propose → vote → queue → execute lifecycle |
 | `test/governor/GovernorNexus.adversarial.t.sol` | Unit suite: malicious/misbehaving ruleset blast-radius containment |
 | `test/governor/GovernorNexus.spamlimit.t.sol` | Unit suite: per-proposer live-proposal cap |
+| `test/governor/GovernorNexus.batch.t.sol` | Unit suite: batch voting — all-or-nothing atomicity, per-item nonce spend, duplicate-id re-votes |
+| `test/governor/GovernorNexus.voteNonce.t.sol` | Unit suite: per-proposal ballot nonces — spend on every applied cast, stale-signature invalidation |
 | `test/governor/GovernorNexus.cancel.t.sol` | Unit suite: cancellation policy — self-cancel + continuous-threshold permissionless cancel |
 | `test/governor/GovernorNexus.bond.t.sol` | Unit suite: bond ruleset wired into the governor — lock at propose, cancel-partition resolution |
 | `test/rulesets/BondRuleset.t.sol` | Unit suite: bond custody, slash predicate table, cancel partition, constructor guards |
@@ -386,7 +392,7 @@ Accepted residuals:
 | `test/governor/GovernorNexus.proposalValidation.t.sol` | Integration suite for the propose-time validation gate (mock validators only): detection/pinning, revert propagation, misbehaving-validator containment |
 | `test/governor/GovernorNexus.optimistic.t.sol` | Integration suite for the optimistic type: validation rules through the gate, allowlist governance loop, e2e lifecycle, veto-withdrawal × anti-snipe |
 | `test/Deploy.t.sol` | Unit suite for the deploy script |
-| `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `ValidatorRulesets`, `Box` test target |
+| `test/mocks/` | `MockENSToken`, `MockGovernor`, `MaliciousRulesets`, `ValidatorRulesets`, `FeeOnTransferToken`, `Box` test target |
 | `test/fork/` | Mainnet-fork suites: behavioral parity (live governor vs GovernorNexus) + A/B gas benchmark |
 
 ## Build & test
@@ -407,7 +413,7 @@ The live ENS governor is a 2021, OZ-v4, Bravo-style deployment with everything f
 deploy time; Governor Nexus rebuilds it on OZ v5.6.1 while keeping its day-to-day
 surface — behavioral parity is proven on a mainnet fork against the live bytecode, with
 each deliberate divergence pinned by the fork suite. What changes is the risk profile:
-the RFC's security assessment under the [Anticapture](https://anticapture.com/ens)
+the RFC's security assessment under the [Anticapture](https://app.anticapture.com/ens/)
 framework places the current setup at **Stage 0**, and the mechanisms below move ENS
 governance to **Stage 1**.
 
@@ -434,7 +440,7 @@ setup/fixture cost. Reference numbers at block 25,445,220 (regenerate with
 
 | op | live gov | GovernorNexus | delta | attribution |
 |---|---:|---:|---:|---|
-| propose | 115,052 | 139,441 | +24,389 | Type-pin SSTORE + transient-context writes + the extra `ProposalTypedCreated` event, plus the spam-limit bookkeeping (active-set append + lazy prune) and the propose-time validation hook — partially offset by OZ v5's packed `ProposalCore` beating the live governor's storage layout. |
-| castVote | 106,982 | 135,831 | +28,849 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE), the anti-snipe low-water evaluation around the cast (outcome views call back into the governor and out to the token), and the per-proposal ballot-nonce spend on every applied cast. |
+| propose | 115,052 | 138,778 | +23,726 | Type-pin SSTORE + transient-context writes + the extra `ProposalTypedCreated` event, plus the spam-limit bookkeeping (active-set append + lazy prune) and the propose-time validation hook — partially offset by OZ v5's packed `ProposalCore` beating the live governor's storage layout. |
+| castVote | 106,982 | 135,842 | +28,860 | One external CALL into the pinned ruleset's `countVote` (cold account access + its own tally SSTORE), the anti-snipe low-water evaluation around the cast (outcome views call back into the governor and out to the token), and the per-proposal ballot-nonce spend on every applied cast. |
 | queue | 102,244 | 121,931 | +19,687 | `queue()`'s state-bitmap check re-derives quorum/success by calling out to the ruleset, which itself calls back into the governor (`proposalSnapshot`) and out to the token (`getPastTotalSupply`) — a multi-hop CALL chain the live governor's local tally doesn't pay. |
 | execute | 79,188 | 61,606 | -17,582 | Net cheaper; `execute()`'s state check re-runs the same ruleset CALL chain as `queue()`, so the sign flip is attributed to the live governor's own (opaque, bytecode-only) execute-path bookkeeping rather than anything ruleset-side. |
