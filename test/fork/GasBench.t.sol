@@ -14,39 +14,9 @@ import {IGov} from "./IGov.sol";
 ///      Run: forge test --match-contract GasBench -vv
 ///      (override the RPC with MAINNET_RPC_URL if the default is rate-limited)
 ///
-///      Measured @ block 25445220, commit cc04973 — gas is the `gasleft()` delta around
-///      the single measured call (excludes setup/fixture cost):
-///
-///      | op      | live gov | GovernorNexus | delta   | attribution                        |
-///      |---------|---------:|--------------:|--------:|-------------------------------------|
-///      | propose |  115,052 |       102,838 | -12,214 | net cheaper despite the type-pin    |
-///      |         |          |               |         | SSTORE + transient-context writes + |
-///      |         |          |               |         | extra `ProposalTypedCreated` event — |
-///      |         |          |               |         | OZ v5's packed `ProposalCore` beats  |
-///      |         |          |               |         | the live governor's own storage     |
-///      |         |          |               |         | layout by more than that adds       |
-///      | castVote|  106,982 |       109,969 |  +2,987 | one external CALL into the pinned   |
-///      |         |          |               |         | ruleset's `countVote` (cold account |
-///      |         |          |               |         | access + its own tally SSTORE) —    |
-///      |         |          |               |         | matches the ~+2.9k expectation      |
-///      | queue   |  102,244 |       117,983 | +15,739 | `queue()`'s state-bitmap check re-  |
-///      |         |          |               |         | derives quorum/success by calling   |
-///      |         |          |               |         | out to the ruleset, which itself    |
-///      |         |          |               |         | calls back into the governor        |
-///      |         |          |               |         | (`proposalSnapshot`) and out to the |
-///      |         |          |               |         | token (`getPastTotalSupply`) — a    |
-///      |         |          |               |         | multi-hop CALL chain the live       |
-///      |         |          |               |         | governor's local tally doesn't pay  |
-///      | execute |   79,188 |        59,747 | -19,441 | net cheaper; `execute()`'s state    |
-///      |         |          |               |         | check re-runs the same ruleset CALL |
-///      |         |          |               |         | chain as queue(), so this delta's   |
-///      |         |          |               |         | sign flip is attributed to the live |
-///      |         |          |               |         | governor's own (opaque, bytecode-   |
-///      |         |          |               |         | only) execute-path bookkeeping      |
-///      |         |          |               |         | rather than anything ruleset-side   |
-///
-///      None of these are "wildly off" (the one hard expectation, castVote, lands within
-///      noise of +2.9k) — see the Task-9 report for the full writeup.
+///      Gas is the `gasleft()` delta around the single measured call (excludes
+///      setup/fixture cost). Reference numbers and their attribution live in the
+///      README's "Gas benchmarks" section.
 contract GasBenchTest is BaseTest {
     // prepared in setUp (separate tx) so measured calls start from realistic cold state
     uint256 internal liveVoteId;

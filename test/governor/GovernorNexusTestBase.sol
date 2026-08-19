@@ -6,16 +6,16 @@ import {Test} from "forge-std/Test.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
 
 /// @dev Shared fixture for GovernorNexus unit suites: deploys token + timelock + plain
 ///      `GovernorNexus` + bootstrap ruleset, funds a majority voter, and provides the
 ///      governance loop that is the only path to the `onlyGovernance` setters.
 ///
-///      With real ruleset counting in place (Task 4) the suites run against production
-///      `GovernorNexus` directly — no counting mixin, no subclass. The bootstrap ruleset's
+///      The suites run against production `GovernorNexus` directly — no counting mixin,
+///      no subclass. The bootstrap ruleset's
 ///      1% quorum is trivially cleared by alice's 2_000_000e18 (the only funded holder here,
 ///      so total supply == her balance), keeping the governance loop passing.
 abstract contract GovernorNexusTestBase is Test {
@@ -24,6 +24,10 @@ abstract contract GovernorNexusTestBase is Test {
     uint48 internal constant VOTING_DELAY = 1;
     uint32 internal constant VOTING_PERIOD = 50;
     uint256 internal constant PROPOSAL_THRESHOLD = 100_000e18;
+    // Late-flip extension params scaled to the 50-block test period — production values
+    // are ENSParams.EXTENSION_WINDOW/EXTENSION_DURATION (24h/48h).
+    uint48 internal constant EXTENSION_WINDOW = 20;
+    uint48 internal constant EXTENSION_DURATION = 40;
 
     MockENSToken internal token;
     TimelockController internal timelock;
@@ -40,7 +44,7 @@ abstract contract GovernorNexusTestBase is Test {
         token = new MockENSToken();
         timelock = new TimelockController(TIMELOCK_DELAY, new address[](0), new address[](0), address(this));
 
-        // Wiring (spec §Wiring note): StandardRuleset.countVote is onlyGovernor and
+        // Wiring: StandardRuleset.countVote is onlyGovernor and
         // quorumReached reads governor.proposalSnapshot, so the bootstrap ruleset must know
         // the governor address — but the governor constructor needs the ruleset. Break the
         // cycle by precomputing the governor's CREATE address (this deployer's next nonce
@@ -55,7 +59,10 @@ abstract contract GovernorNexusTestBase is Test {
             standardRuleset,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            _maxActiveProposals(),
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
         require(address(governor) == predictedGovernor, "governor address prediction failed");
 
@@ -68,6 +75,13 @@ abstract contract GovernorNexusTestBase is Test {
         vm.roll(block.number + 1);
     }
 
+    /// @dev Per-proposer live-proposal cap the fixture governor is deployed with. Suites
+    ///      whose scenarios need more simultaneous live proposals from one proposer than
+    ///      the default override this.
+    function _maxActiveProposals() internal pure virtual returns (uint8) {
+        return 2;
+    }
+
     function _fund(address account, uint256 amount) internal {
         token.mint(account, amount);
         vm.prank(account);
@@ -77,6 +91,16 @@ abstract contract GovernorNexusTestBase is Test {
     /// @dev Deploys a fresh StandardRuleset (a valid IRuleset) wired to the fixture governor.
     function _newRuleset() internal returns (StandardRuleset) {
         return new StandardRuleset(address(governor), IVotes(address(token)), 1);
+    }
+
+    /// @dev StandardRuleset bound to the address the NEXT `new GovernorNexus(...)` from this
+    ///      test contract will deploy to — registration checks the binding, so tests that
+    ///      deploy a second governor need a ruleset wired to it, not to the fixture governor.
+    ///      Exactly one deploy (the ruleset itself) must sit between this call and that
+    ///      governor deploy.
+    function _rulesetForNextGovernor() internal returns (StandardRuleset) {
+        address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        return new StandardRuleset(predicted, IVotes(address(token)), 1);
     }
 
     // ───────────────── Governance loop (the only path to the setters) ─────────────────

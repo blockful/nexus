@@ -5,9 +5,9 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — exercises the "165 but wrong interface" guardrail.
@@ -53,16 +53,40 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
     }
 
     function test_constructor_emitsTypeRegistered() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
         vm.expectEmit(true, true, false, true);
-        emit TypeRegistered(0, standardRuleset, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
+        emit TypeRegistered(0, rs, VOTING_DELAY, VOTING_PERIOD, PROPOSAL_THRESHOLD);
         new GovernorNexus(
             "GovernorNexus",
             IVotes(address(token)),
             timelock,
-            standardRuleset,
+            rs,
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
+    /// @dev Genesis default is announced like any later change — event-sourcing indexers
+    ///      reconstruct the default-type pointer with no deployment special case.
+    function test_constructor_emitsGenesisDefaultTypeSet() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
+        vm.expectEmit(true, false, false, true);
+        emit DefaultTypeSet(0);
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            rs,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
     }
 
@@ -75,14 +99,44 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             IRuleset(address(0)),
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
     }
 
     function test_constructor_revertsOnZeroVotingPeriod() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
         new GovernorNexus(
-            "GovernorNexus", IVotes(address(token)), timelock, standardRuleset, VOTING_DELAY, 0, PROPOSAL_THRESHOLD
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            rs,
+            VOTING_DELAY,
+            0,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
+    function test_constructor_revertsOnZeroVotingDelay() public {
+        StandardRuleset rs = _rulesetForNextGovernor();
+        vm.expectRevert(GovernorNexus.InvalidVotingDelay.selector);
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            rs,
+            0,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
     }
 
@@ -96,7 +150,32 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             IRuleset(address(notRuleset)),
             VOTING_DELAY,
             VOTING_PERIOD,
-            PROPOSAL_THRESHOLD
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
+        );
+    }
+
+    function test_constructor_revertsOnRulesetBoundToAnotherGovernor() public {
+        // The fixture ruleset is bound to the fixture governor — a second governor deploy
+        // reusing it must be refused at registration of row 0.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                GovernorNexus.RulesetGovernorMismatch.selector, address(standardRuleset), address(governor)
+            )
+        );
+        new GovernorNexus(
+            "GovernorNexus",
+            IVotes(address(token)),
+            timelock,
+            standardRuleset,
+            VOTING_DELAY,
+            VOTING_PERIOD,
+            PROPOSAL_THRESHOLD,
+            2,
+            EXTENSION_WINDOW,
+            EXTENSION_DURATION
         );
     }
 
@@ -125,7 +204,7 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         // A second registration takes id 2.
         StandardRuleset rs2 = _newRuleset();
         _executeSelfCall(
-            abi.encodeCall(GovernorNexus.registerType, (rs2, uint48(2), uint32(9), uint256(1))), "register type 2"
+            abi.encodeCall(GovernorNexus.registerType, (rs2, uint48(2), uint32(29), uint256(1))), "register type 2"
         );
         assertEq(governor.typeCount(), 3);
         assertEq(address(governor.getTypeConfig(2).ruleset), address(rs2));
@@ -146,6 +225,15 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
             abi.encodeCall(GovernorNexus.registerType, (rs, VOTING_DELAY, uint32(0), uint256(0))), "zero period"
         );
         vm.expectRevert(GovernorNexus.InvalidVotingPeriod.selector);
+        governor.execute(t, v, c, h);
+    }
+
+    function test_registerType_revertsOnZeroVotingDelay() public {
+        StandardRuleset rs = _newRuleset();
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _prepareSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (rs, uint48(0), VOTING_PERIOD, uint256(0))), "zero delay"
+        );
+        vm.expectRevert(GovernorNexus.InvalidVotingDelay.selector);
         governor.execute(t, v, c, h);
     }
 
@@ -182,6 +270,19 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         governor.execute(t, v, c, h);
     }
 
+    function test_registerType_revertsOnRulesetBoundToAnotherGovernor() public {
+        address otherGovernor = makeAddr("otherGovernor");
+        StandardRuleset foreign = new StandardRuleset(otherGovernor, IVotes(address(token)), 1);
+        (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) = _prepareSelfCall(
+            abi.encodeCall(GovernorNexus.registerType, (foreign, VOTING_DELAY, VOTING_PERIOD, uint256(0))),
+            "foreign-bound ruleset"
+        );
+        vm.expectRevert(
+            abi.encodeWithSelector(GovernorNexus.RulesetGovernorMismatch.selector, address(foreign), otherGovernor)
+        );
+        governor.execute(t, v, c, h);
+    }
+
     function test_registerType_revertsForUnauthorizedCaller() public {
         StandardRuleset rs = _newRuleset();
         vm.prank(eoa);
@@ -197,7 +298,7 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
 
         // Register a new type and toggle/point at it — none of which may touch row 0 content.
         StandardRuleset rs = _newRuleset();
-        _executeSelfCall(abi.encodeCall(GovernorNexus.registerType, (rs, uint48(9), uint32(9), uint256(9))), "reg");
+        _executeSelfCall(abi.encodeCall(GovernorNexus.registerType, (rs, uint48(9), uint32(29), uint256(9))), "reg");
         _executeSelfCall(abi.encodeCall(GovernorNexus.setDefaultType, (uint8(1))), "default to 1");
         _executeSelfCall(abi.encodeCall(GovernorNexus.setTypeActive, (uint8(0), false)), "deactivate 0");
 
@@ -257,7 +358,7 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
 
     function test_setDefaultType_movesPointerAndEmits() public {
         StandardRuleset rs = _newRuleset();
-        _executeSelfCall(abi.encodeCall(GovernorNexus.registerType, (rs, uint48(3), uint32(11), uint256(5))), "reg");
+        _executeSelfCall(abi.encodeCall(GovernorNexus.registerType, (rs, uint48(3), uint32(31), uint256(5))), "reg");
 
         (address[] memory t, uint256[] memory v, bytes[] memory c, bytes32 h) =
             _prepareSelfCall(abi.encodeCall(GovernorNexus.setDefaultType, (uint8(1))), "default to 1");
@@ -268,7 +369,7 @@ contract GovernorNexusRegistryTest is GovernorNexusTestBase {
         assertEq(governor.defaultTypeId(), 1);
         // Default-type views now read row 1.
         assertEq(governor.votingDelay(), 3);
-        assertEq(governor.votingPeriod(), 11);
+        assertEq(governor.votingPeriod(), 31);
         assertEq(governor.proposalThreshold(), 5);
     }
 

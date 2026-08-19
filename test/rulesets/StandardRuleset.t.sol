@@ -6,10 +6,12 @@ import {Test} from "forge-std/Test.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
-import {MockENSToken} from "./mocks/MockENSToken.sol";
-import {MockGovernor} from "./mocks/MockGovernor.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {RulesetCounting} from "../../src/RulesetCounting.sol";
+import {RulesetQuorumFraction} from "../../src/RulesetQuorumFraction.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
+import {MockENSToken} from "../mocks/MockENSToken.sol";
+import {MockGovernor} from "../mocks/MockGovernor.sol";
 
 /// @dev Isolated unit suite: no governor implementation exists yet, so `MockGovernor`
 ///      supplies the one method StandardRuleset consumes (`proposalSnapshot`) and doubles
@@ -57,8 +59,14 @@ contract StandardRulesetTest is Test {
     }
 
     function test_constructor_revertsWithQuorumNumeratorAboveDenominator() public {
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.InvalidQuorumFraction.selector, 101, 100));
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 101, 100));
         new StandardRuleset(address(governor), IVotes(address(token)), 101);
+    }
+
+    function test_constructor_revertsWithZeroQuorumNumerator() public {
+        // Zero would make `quorumReached` unconditionally true — rejected at construction.
+        vm.expectRevert(abi.encodeWithSelector(RulesetQuorumFraction.InvalidQuorumFraction.selector, 0, 100));
+        new StandardRuleset(address(governor), IVotes(address(token)), 0);
     }
 
     function _countVote(address voter, uint8 support, uint256 weight) internal returns (uint256) {
@@ -84,7 +92,7 @@ contract StandardRulesetTest is Test {
 
     function test_countVote_revertsWhenCallerIsNotGovernor() public {
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.Unauthorized.selector, stranger));
+        vm.expectRevert(abi.encodeWithSelector(RulesetCounting.Unauthorized.selector, stranger));
         ruleset.countVote(PROPOSAL_ID, alice, 1, 600e18, "");
     }
 
@@ -121,23 +129,53 @@ contract StandardRulesetTest is Test {
 
     function test_countVote_revertsOnSupportGreaterThanTwo() public {
         vm.prank(address(governor));
-        vm.expectRevert(StandardRuleset.InvalidVoteType.selector);
+        vm.expectRevert(RulesetCounting.InvalidVoteType.selector);
         ruleset.countVote(PROPOSAL_ID, alice, 3, 600e18, "");
     }
 
     // ─────────────────────────── Revote ───────────────────────────
 
-    function test_countVote_revertsOnDoubleVote() public {
+    /// @dev The one semantic delta vs the live ENS governor (which reverts):
+    ///      re-voting replaces the standing vote. Mechanics are covered in `RulesetCounting.t.sol`;
+    ///      here we pin that StandardRuleset inherits them and that its *rules* follow the tally.
+    function test_countVote_revoteReplacesPreviousVote() public {
+        _countVote(alice, 1, 600e18); // for
+        _countVote(alice, 0, 600e18); // against — replaces
+
+        (uint256 against, uint256 for_,) = ruleset.proposalVotes(PROPOSAL_ID);
+        assertEq(for_, 0);
+        assertEq(against, 600e18);
+    }
+
+    function test_voteSucceeded_flipsBackToFalseOnRevoteAway() public {
         _countVote(alice, 1, 600e18);
-        vm.prank(address(governor));
-        vm.expectRevert(abi.encodeWithSelector(StandardRuleset.AlreadyVoted.selector, alice));
-        ruleset.countVote(PROPOSAL_ID, alice, 0, 600e18, "");
+        assertTrue(ruleset.voteSucceeded(PROPOSAL_ID));
+
+        _countVote(alice, 0, 600e18);
+        assertFalse(ruleset.voteSucceeded(PROPOSAL_ID), "success is non-monotonic under re-votes");
+    }
+
+    function test_quorumReached_flipsBackToFalseOnRevoteToZeroWeightBucket() public {
+        // carol alone cannot reach quorum; bob can. Bob votes, then re-votes with the weight the
+        // governor would pass after... nothing changes — quorum counts for+abstain, so a re-vote
+        // from For to Against drops the quorum-eligible tally back below the bar.
+        _countVote(bob, 1, 350e18); // for -> quorum (100e18) reached
+        assertTrue(ruleset.quorumReached(PROPOSAL_ID));
+
+        _countVote(bob, 0, 350e18); // against does not count toward quorum
+        assertFalse(ruleset.quorumReached(PROPOSAL_ID), "quorum is non-monotonic under re-votes");
     }
 
     function test_hasVoted_reflectsState() public {
         assertFalse(ruleset.hasVoted(PROPOSAL_ID, alice));
         _countVote(alice, 1, 600e18);
         assertTrue(ruleset.hasVoted(PROPOSAL_ID, alice));
+    }
+
+    function test_hasVoted_staysTrueAfterRevote() public {
+        _countVote(alice, 1, 600e18);
+        _countVote(alice, 0, 600e18);
+        assertTrue(ruleset.hasVoted(PROPOSAL_ID, alice), "hasVoted means 'has a standing vote'");
     }
 
     // ─────────────────────────── Zero weight ───────────────────────────

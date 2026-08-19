@@ -8,28 +8,32 @@ import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
 import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 
-import {IRuleset} from "./IRuleset.sol";
+import {GovernorPreventLateFlip} from "./GovernorPreventLateFlip.sol";
+import {IProposalValidator} from "./interfaces/IProposalValidator.sol";
+import {IRuleset} from "./interfaces/IRuleset.sol";
 
 /// @title GovernorNexus
 /// @notice Modular ENS governor core. Replaces OZ's baked-in settings/counting/quorum
 ///         extensions with a governed table of proposal types, each pinning a pluggable
 ///         `IRuleset` plus the propose-time parameters (delay, period, threshold).
-/// @dev Stock OZ v5.6.1 `Governor` + `GovernorVotes` + `GovernorTimelockControl`; the
-///      dropped extensions (`GovernorSettings`, `GovernorCountingSimple`,
-///      `GovernorVotesQuorumFraction`) are supplied here — settings from the default type
-///      row, counting via ruleset dispatch (Task 4). The type table is append-only and
-///      content-immutable (spec D5): only `active` toggles and the default pointer move.
-contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
-    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod` and
-    ///         `proposalThreshold` are set once at registration and never mutated;
-    ///         `active` is the only mutable field and gates NEW proposals only.
+/// @dev Stock OZ v5.6.1 `Governor` + `GovernorVotes` + `GovernorTimelockControl` plus the
+///      in-house `GovernorPreventLateFlip`. Settings come from the default type row and
+///      counting is dispatched to rulesets. The type table is append-only and
+///      content-immutable: only `active` toggles and the default pointer move.
+contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl, GovernorPreventLateFlip {
+    /// @notice A registered proposal type. `ruleset`, `votingDelay`, `votingPeriod`,
+    ///         `hasProposalValidation` and `proposalThreshold` are set once at registration and
+    ///         never mutated; `active` is the only mutable field and gates NEW proposals
+    ///         only.
     struct TypeConfig {
         IRuleset ruleset;
         uint48 votingDelay;
         uint32 votingPeriod;
-        uint256 proposalThreshold;
         bool active;
+        bool hasProposalValidation;
+        uint256 proposalThreshold;
     }
 
     mapping(uint8 => TypeConfig) private _types;
@@ -44,11 +48,30 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     /// @dev Proposal-to-type pin, written exactly once at propose time.
     mapping(uint256 proposalId => uint8) private _proposalType;
 
-    /// @dev Transaction-scoped propose-time type context (EIP-1153 transient storage, spec
-    ///      D10). Holds `typeId + 1` only while `_proposeWithType` runs `super._propose`, so
-    ///      `votingDelay()`/`votingPeriod()` serve the typed line values to the stock
-    ///      `_propose` body without a persistent-storage handoff; 0 means "unset", keeping
-    ///      type 0 distinguishable from "no context". `uint16` so `typeId + 1` cannot wrap.
+    /// @dev Timepoint of the governor-path cancel, 0 if never canceled through the governor.
+    mapping(uint256 proposalId => uint48) private _canceledAt;
+
+    /// @dev Per-proposal EIP-712 ballot nonces. Vote signatures validate against this,
+    ///      not the inherited account-global `Nonces` (which stays orphaned at 0).
+    mapping(uint256 proposalId => mapping(address voter => uint256)) private _voteNonces;
+
+    /// @dev Ids of the proposer's tracked proposals, lazily pruned on their next propose.
+    ///      An id is pushed only after {_pruneAndCheckActiveLimit} passes, so length is
+    ///      bounded by the cap in effect at push time (never above the ceiling). Lowering
+    ///      the cap does not retroactively prune, so length can transiently exceed it.
+    mapping(address proposer => uint256[] proposalIds) private _activeProposals;
+
+    /// @dev Per-proposer cap on concurrently live (Pending|Active) proposals.
+    uint8 private _maxActiveProposals;
+
+    /// @notice Hard ceiling `setMaxActiveProposals` can never exceed; bounds the
+    ///         propose-time prune to at most 10 `state()` reads.
+    uint8 public constant MAX_ACTIVE_PROPOSALS_CEILING = 10;
+
+    /// @dev Transaction-scoped propose-time type context (EIP-1153). Holds `typeId + 1`
+    ///      only while `_proposeWithType` runs `super._propose`, so `votingDelay()`/
+    ///      `votingPeriod()` serve the typed line values; 0 means "unset". `uint16` so
+    ///      `typeId + 1` cannot wrap.
     uint16 private transient _typeContext;
 
     /// @notice A new type was appended to the table.
@@ -63,6 +86,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     event TypeActiveSet(uint8 indexed typeId, bool active);
     /// @notice The default type pointer moved.
     event DefaultTypeSet(uint8 indexed typeId);
+    /// @notice The per-proposer live-proposal cap was set.
+    event MaxActiveProposalsSet(uint8 maxActiveProposals);
     /// @notice A proposal was created and pinned to `typeId` (companion to the stock
     ///         `ProposalCreated`, emitted in the same call).
     event ProposalTypedCreated(uint256 indexed proposalId, uint8 indexed typeId, IRuleset indexed ruleset);
@@ -71,25 +96,44 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     error RulesetZeroAddress();
     /// @notice `ruleset` does not advertise `IRuleset` via ERC165.
     error RulesetInterfaceUnsupported(address ruleset);
+    /// @notice `ruleset` is bound to `boundGovernor`, not this governor — it would revert
+    ///         `Unauthorized` on first countVote/validateProposal, bricking the type.
+    error RulesetGovernorMismatch(address ruleset, address boundGovernor);
     /// @notice `votingPeriod` is zero, which would open a proposal with no voting window.
     error InvalidVotingPeriod();
+    /// @notice `votingDelay` is zero, which would put the snapshot in the propose block
+    ///         (flash-loanable voting power) and erase the pre-vote cancel window.
+    error InvalidVotingDelay();
     /// @notice `typeId` has never been registered (`typeId >= typeCount`).
     error NonexistentType(uint8 typeId);
     /// @notice `typeId` is the current default and cannot be deactivated.
     error CannotDeactivateDefaultType(uint8 typeId);
     /// @notice `typeId` cannot become the default while inactive.
     error TypeInactive(uint8 typeId);
+    /// @notice `proposer` already has `maxActiveProposals` live (Pending|Active) proposals.
+    error ProposerActiveLimitReached(address proposer, uint8 maxActiveProposals);
+    /// @notice The cap is zero (bricks every propose) or above the ceiling.
+    error InvalidMaxActiveProposals(uint8 maxActiveProposals);
+    /// @notice `votingPeriod` does not exceed `extensionWindow`, which would make the
+    ///         "final window" span the entire vote.
+    error VotingPeriodTooShort(uint32 votingPeriod, uint48 extensionWindow);
+    /// @notice `castVoteWithReasonAndParamsBatch` was called with zero items.
+    error EmptyBatch();
+    /// @notice `castVoteWithReasonAndParamsBatch` array arguments have different lengths.
+    error BatchLengthMismatch();
 
     /// @param name_ Governor name; feeds `name()` and the EIP-712 domain separator that
-    ///        vote-by-sig is bound to. The deploy chooses the domain (`"ENS Governor"` for
-    ///        the ENS deployment, so vote-by-sig signatures match the live governor's
-    ///        domain), leaving the contract itself reusable across deployments (spec D11).
+    ///        vote-by-sig is bound to (`"ENS Governor"` for the ENS deployment).
     /// @param token Voting token (block-number or timestamp clock, per the token).
     /// @param timelock Executor holding queued proposals; also the sole governance caller.
     /// @param standardRuleset Ruleset for the bootstrap type (row 0), the default.
     /// @param votingDelay_ Bootstrap type voting delay.
     /// @param votingPeriod_ Bootstrap type voting period; must be non-zero.
     /// @param proposalThreshold_ Bootstrap type proposal threshold.
+    /// @param maxActiveProposals_ Per-proposer live-proposal cap;
+    ///        `1..MAX_ACTIVE_PROPOSALS_CEILING`, enforced by the same guard as the setter.
+    /// @param extensionWindow_ Late-flip trigger window (see `GovernorPreventLateFlip`).
+    /// @param extensionDuration_ Late-flip extension length (see `GovernorPreventLateFlip`).
     /// @dev Registers row 0 under the same guardrails as `registerType` and sets it as the
     ///      default, atomically. No deployer-privileged post-deploy setup exists.
     constructor(
@@ -99,16 +143,27 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         IRuleset standardRuleset,
         uint48 votingDelay_,
         uint32 votingPeriod_,
-        uint256 proposalThreshold_
-    ) Governor(name_) GovernorVotes(token) GovernorTimelockControl(timelock) {
+        uint256 proposalThreshold_,
+        uint8 maxActiveProposals_,
+        uint48 extensionWindow_,
+        uint48 extensionDuration_
+    )
+        Governor(name_)
+        GovernorVotes(token)
+        GovernorTimelockControl(timelock)
+        GovernorPreventLateFlip(extensionWindow_, extensionDuration_)
+    {
         _registerType(standardRuleset, votingDelay_, votingPeriod_, proposalThreshold_);
         defaultTypeId = 0;
+        emit DefaultTypeSet(0);
+        _setMaxActiveProposals(maxActiveProposals_);
     }
 
     // ─────────────────────────── Type registry ───────────────────────────
 
     /// @notice Append a new proposal type at `typeCount`, registered active.
-    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165.
+    /// @param ruleset Non-zero address advertising `IRuleset` via ERC165 and bound to this
+    ///        governor (`ruleset.governor() == address(this)`).
     /// @param votingDelay_ Blocks/seconds between propose and snapshot.
     /// @param votingPeriod_ Voting window length; must be non-zero.
     /// @param proposalThreshold_ Minimum proposer voting power.
@@ -141,6 +196,23 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         emit DefaultTypeSet(typeId);
     }
 
+    /// @notice Set the per-proposer live-proposal cap.
+    /// @param maxActiveProposals_ New cap; `1..MAX_ACTIVE_PROPOSALS_CEILING`.
+    function setMaxActiveProposals(uint8 maxActiveProposals_) external onlyGovernance {
+        _setMaxActiveProposals(maxActiveProposals_);
+    }
+
+    /// @dev Shared by the constructor and {setMaxActiveProposals} so the guard cannot drift.
+    ///      Zero is rejected: it would revert every propose forever, including the
+    ///      governance proposal needed to raise the cap back.
+    function _setMaxActiveProposals(uint8 maxActiveProposals_) private {
+        if (maxActiveProposals_ == 0 || maxActiveProposals_ > MAX_ACTIVE_PROPOSALS_CEILING) {
+            revert InvalidMaxActiveProposals(maxActiveProposals_);
+        }
+        _maxActiveProposals = maxActiveProposals_;
+        emit MaxActiveProposalsSet(maxActiveProposals_);
+    }
+
     /// @dev Single registration path shared by the constructor and `registerType`, so
     ///      guardrails and the `TypeRegistered` event cannot drift. Ids are never reused;
     ///      `typeCount++` on a `uint8` panics once `typeCount == 255`, so the last
@@ -153,15 +225,23 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         if (!ERC165Checker.supportsInterface(address(ruleset), type(IRuleset).interfaceId)) {
             revert RulesetInterfaceUnsupported(address(ruleset));
         }
+        address boundGovernor = ruleset.governor();
+        if (boundGovernor != address(this)) revert RulesetGovernorMismatch(address(ruleset), boundGovernor);
+        if (votingDelay_ == 0) revert InvalidVotingDelay();
         if (votingPeriod_ == 0) revert InvalidVotingPeriod();
+        // Enforces GovernorPreventLateFlip's integration requirement at type registration.
+        if (votingPeriod_ <= extensionWindow) revert VotingPeriodTooShort(votingPeriod_, extensionWindow);
 
         id = typeCount++;
         _types[id] = TypeConfig({
             ruleset: ruleset,
             votingDelay: votingDelay_,
             votingPeriod: votingPeriod_,
-            proposalThreshold: proposalThreshold_,
-            active: true
+            active: true,
+            hasProposalValidation: ERC165Checker.supportsInterface(
+                address(ruleset), type(IProposalValidator).interfaceId
+            ),
+            proposalThreshold: proposalThreshold_
         });
         emit TypeRegistered(id, ruleset, votingDelay_, votingPeriod_, proposalThreshold_);
     }
@@ -189,20 +269,26 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return _types[proposalType(proposalId)].ruleset;
     }
 
+    /// @notice Timepoint `proposalId` was canceled through the governor; 0 if it never was.
+    /// @dev 0 is a double-duty sentinel: it also covers a proposal canceled directly on the
+    ///      timelock (security-council veto), which never runs the governor's `_cancel`.
+    ///      Consumers disambiguate by checking `state(proposalId) == Canceled` first — see
+    ///      BondRuleset's cancel partition.
+    function proposalCanceledAt(uint256 proposalId) external view returns (uint48) {
+        return _canceledAt[proposalId];
+    }
+
     // ─────────────────────────── Propose paths ───────────────────────────
 
     /// @notice Create a proposal governed by type `typeId`, pinning it for its lifetime.
-    /// @dev Mirrors the stock `propose()` pre-checks with per-type parameters: the
-    ///      `#proposer=` suffix defense, type existence + `active`, and the type line's
-    ///      `proposalThreshold` against the proposer's votes at `clock() - 1`. Everything
-    ///      else (length/duplicate validation, storage, `ProposalCreated`) runs in the
-    ///      stock `_propose` via {_proposeWithType}.
+    /// @dev Mirrors the stock `propose()` pre-checks with per-type parameters; everything
+    ///      else runs in the stock `_propose` via {_proposeWithType}.
     /// @param targets Call targets, one per action.
     /// @param values ETH values, one per action.
     /// @param calldatas Encoded calls, one per action.
     /// @param description Human-readable description; hashed into the proposal id.
     /// @param typeId Registered, active proposal type to pin.
-    /// @return proposalId Stock type-agnostic proposal id (typeId is NOT hashed — spec D2).
+    /// @return proposalId Stock type-agnostic proposal id (typeId is not hashed).
     function proposeWithType(
         address[] memory targets,
         uint256[] memory values,
@@ -245,18 +331,12 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         return proposeWithType(targets, values, calldatas, description, defaultTypeId);
     }
 
-    /// @dev Creates the proposal through the stock `_propose` (sole `ProposalCore` writer —
-    ///      it is `private` storage in OZ v5.6.1) under a transient type context, then pins.
-    ///
-    ///      Safety of the transient handoff (spec D10): the only external calls reachable
-    ///      under the context are staticcalls inside stock `_propose`'s (Governor.sol:305-341)
-    ///      duplicate-proposal branch (`state(proposalId)`, which can staticcall the ruleset
-    ///      past-deadline or the timelock when queued) — and that branch reverts
-    ///      unconditionally, so no committed state is ever produced while the context is
-    ///      set. There is no reentrancy window in which `votingDelay()`/`votingPeriod()`
-    ///      could mislead an external reader, and at rest they remain honest default-type
-    ///      views. The clear after the `super` call is belt-and-braces on top of the
-    ///      EIP-1153 end-of-transaction reset.
+    /// @dev Creates the proposal through the stock `_propose` (sole `ProposalCore` writer)
+    ///      under the transient type context, then pins. Invariant the context relies on:
+    ///      while the context is set, no external call that could observe `votingDelay()`/
+    ///      `votingPeriod()` and commit state is reachable — stock `_propose`'s only
+    ///      external dispatch sits in its duplicate-proposal branch, which reverts
+    ///      unconditionally. Any change that opens such a call breaks this.
     function _proposeWithType(
         address[] memory targets,
         uint256[] memory values,
@@ -265,18 +345,86 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         address proposer,
         uint8 typeId
     ) internal virtual returns (uint256 proposalId) {
+        // Check-then-record inside the single ProposalCore-writing chokepoint, so no
+        // creation door — present or future — can miss either half.
+        _pruneAndCheckActiveLimit(proposer);
+
+        TypeConfig storage config = _types[typeId];
+        if (config.hasProposalValidation) {
+            IProposalValidator(address(config.ruleset))
+                .validateProposal(
+                    hashProposal(targets, values, calldatas, keccak256(bytes(description))),
+                    proposer,
+                    targets,
+                    values,
+                    calldatas
+                );
+        }
+
         _typeContext = uint16(typeId) + 1;
         proposalId = super._propose(targets, values, calldatas, description, proposer);
         _typeContext = 0;
 
         _proposalType[proposalId] = typeId;
+        _activeProposals[proposer].push(proposalId);
         emit ProposalTypedCreated(proposalId, typeId, _types[typeId].ruleset);
     }
 
+    // ─────────────────────────── Spam limit ───────────────────────────
+
+    /// @dev Drops every tracked id that left the live set, then enforces the cap. The live
+    ///      set is a positive whitelist — `Pending` or `Active`, nothing else — so new
+    ///      lifecycle states fail closed.
+    function _pruneAndCheckActiveLimit(address proposer) private {
+        uint256[] storage ids = _activeProposals[proposer];
+        uint256 length = ids.length;
+        uint256 i = 0;
+        while (i < length) {
+            if (_isLive(ids[i])) {
+                ++i;
+            } else {
+                ids[i] = ids[length - 1];
+                ids.pop();
+                --length;
+            }
+        }
+        if (length >= _maxActiveProposals) {
+            revert ProposerActiveLimitReached(proposer, _maxActiveProposals);
+        }
+    }
+
+    /// @dev Liveness probe kept deliberately ruleset-free: a ruleset with poisoned views must
+    ///      never be able to brick its proposer's next propose (this runs in the prune loop on
+    ///      every propose). Hence it never routes through `_wouldPass`, and is conservative for a
+    ///      `FailingObserved` id — holding the slot up to `extensionDuration` longer than needed.
+    function _isLive(uint256 proposalId) private view returns (bool) {
+        uint256 originalDeadline = _originalDeadline(proposalId);
+        if (clock() <= originalDeadline) {
+            ProposalState s = state(proposalId);
+            return s == ProposalState.Pending || s == ProposalState.Active;
+        }
+        if (_lateFlipStageOf(proposalId) == LateFlipStage.None) return false;
+        return clock() <= originalDeadline + extensionDuration;
+    }
+
+    /// @notice Current per-proposer live-proposal cap.
+    function maxActiveProposals() public view returns (uint8) {
+        return _maxActiveProposals;
+    }
+
+    /// @notice Number of `proposer`'s proposals currently Pending|Active; ids awaiting
+    ///         their lazy prune are never counted.
+    function activeProposalCount(address proposer) external view returns (uint256 count) {
+        uint256[] storage ids = _activeProposals[proposer];
+        uint256 length = ids.length;
+        for (uint256 i = 0; i < length; ++i) {
+            if (_isLive(ids[i])) ++count;
+        }
+    }
+
     // ─────────────────────── Default-type settings views ───────────────────────
-    // Final spec form: the governor's propose-time parameters read the default type row —
-    // except under the transient propose-time context, when they serve the typed line
-    // (see `_proposeWithType`; never observable externally).
+    // Propose-time parameters read the default type row — except under the transient
+    // propose-time context, when they serve the typed line (see `_proposeWithType`).
 
     /// @inheritdoc Governor
     function votingDelay() public view virtual override returns (uint256) {
@@ -297,26 +445,21 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     }
 
     /// @inheritdoc Governor
-    /// @dev Always the default type row — unlike `votingDelay`/`votingPeriod`, this is never
-    ///      served from the transient propose-time context, since `_propose` never reads
-    ///      `proposalThreshold()` (the threshold check runs upstream, in
-    ///      {proposeWithType}, against the pinned type's own line).
+    /// @dev Always the default type row — never served from the transient context; the
+    ///      threshold check runs upstream in {proposeWithType} against the typed line.
     function proposalThreshold() public view virtual override returns (uint256) {
         return _types[defaultTypeId].proposalThreshold;
     }
 
-    // ─────────────────────────── Counting dispatch (Task 4) ───────────────────────────
+    // ─────────────────────────── Counting dispatch ───────────────────────────
     // The core never tallies: every counting hook forwards to the ruleset pinned to the
-    // proposal's type. `COUNTING_MODE`/`quorum` take no proposal id, so they are documented
-    // default-type views over `defaultTypeId`'s ruleset (per-proposal answers are reachable
-    // via `proposalRuleset(id)`).
+    // proposal's type. `COUNTING_MODE`/`quorum` take no proposal id, so they are
+    // default-type views over `defaultTypeId`'s ruleset.
 
-    /// @dev The ruleset governing `proposalId`, resolved through its propose-time type pin.
-    ///      Safe without an existence check on the hot path: the pin is written once at
-    ///      creation and the type row's ruleset is content-immutable, and stock `Governor`
-    ///      state checks reject votes/queries on nonexistent proposals before counting is
-    ///      reached. A read-only `hasVoted` on a never-created id is the sole exception (see
-    ///      its natspec).
+    /// @dev The ruleset governing `proposalId`, via its propose-time pin. No existence
+    ///      check on the hot path: stock `Governor` state checks reject nonexistent
+    ///      proposals before counting is reached (sole exception: read-only `hasVoted`,
+    ///      see its natspec).
     function _rulesetOf(uint256 proposalId) private view returns (IRuleset) {
         return _types[_proposalType[proposalId]].ruleset;
     }
@@ -330,10 +473,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     }
 
     /// @inheritdoc IGovernor
-    /// @dev Delegates to the proposal's ruleset. For a never-created `proposalId` this reads
-    ///      the type-0 ruleset's (empty) tally and returns false rather than reverting — no
-    ///      existence guard is added, since the answer is harmless and the hot path stays
-    ///      cheap; use `proposalType`/`proposalRuleset` when an existence check is required.
+    /// @dev Delegates to the proposal's ruleset. A never-created `proposalId` reads the
+    ///      type-0 ruleset's empty tally and returns false rather than reverting.
     function hasVoted(uint256 proposalId, address account) public view virtual override returns (bool) {
         return _rulesetOf(proposalId).hasVoted(proposalId, account);
     }
@@ -355,9 +496,8 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
     }
 
     /// @dev Routes a cast vote to the proposal's ruleset, which owns tallying and rule
-    ///      enforcement (one-vote-per-voter, valid support). `totalWeight` is the core's
-    ///      token-checkpoint weight at the frozen snapshot; the ruleset buckets it and can
-    ///      never invent it. The returned counted weight bubbles back to `_castVote`.
+    ///      enforcement. `totalWeight` is the core's token-checkpoint weight at the frozen
+    ///      snapshot; the ruleset buckets it and can never invent it.
     function _countVote(uint256 proposalId, address account, uint8 support, uint256 totalWeight, bytes memory params)
         internal
         virtual
@@ -365,6 +505,154 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         returns (uint256)
     {
         return _rulesetOf(proposalId).countVote(proposalId, account, support, totalWeight, params);
+    }
+
+    // ─────────────────────────── Per-proposal ballot nonce ───────────────────────────
+    // Under mutable votes the last-applied cast wins, so an outstanding signed ballot could
+    // be submitted AFTER a later cast and override it. Every applied cast (direct, bySig,
+    // or batch item) spends the (proposalId, voter) nonce in `_castVote`, and signatures
+    // validate against the current value — so a cast invalidates the voter's outstanding
+    // signed ballots for THAT proposal only. The account-global `Nonces` inherited through
+    // OZ `Governor` is never spent and stays 0.
+
+    /// @notice Next expected EIP-712 ballot nonce for `account` on `proposalId`.
+    /// @dev Source of truth for building vote signatures; increments on every applied cast.
+    ///      The inherited `nonces(address)` is NOT used for ballots.
+    function voteNonce(uint256 proposalId, address account) public view virtual returns (uint256) {
+        return _voteNonces[proposalId][account];
+    }
+
+    /// @dev Ballot digest bound to the per-proposal nonce — a read, not a spend; the spend
+    ///      happens in `_castVote` when the vote is applied. Tightened to `view` (the OZ base
+    ///      is nonpayable because it spends a nonce; this override only reads).
+    function _validateVoteSig(uint256 proposalId, uint8 support, address voter, bytes memory signature)
+        internal
+        view
+        virtual
+        override
+        returns (bool)
+    {
+        return SignatureChecker.isValidSignatureNow(
+            voter,
+            _hashTypedDataV4(
+                keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support, voter, voteNonce(proposalId, voter)))
+            ),
+            signature
+        );
+    }
+
+    /// @dev Extended-ballot digest bound to the per-proposal nonce; see {_validateVoteSig}.
+    function _validateExtendedVoteSig(
+        uint256 proposalId,
+        uint8 support,
+        address voter,
+        string memory reason,
+        bytes memory params,
+        bytes memory signature
+    ) internal view virtual override returns (bool) {
+        return SignatureChecker.isValidSignatureNow(
+            voter,
+            _hashTypedDataV4(
+                keccak256(
+                    abi.encode(
+                        EXTENDED_BALLOT_TYPEHASH,
+                        proposalId,
+                        support,
+                        voter,
+                        voteNonce(proposalId, voter),
+                        keccak256(bytes(reason)),
+                        keccak256(params)
+                    )
+                )
+            ),
+            signature
+        );
+    }
+
+    // ──────────────── Governor / extension overrides (pure disambiguation) ────────────────
+
+    /// @inheritdoc IGovernor
+    function proposalDeadline(uint256 proposalId)
+        public
+        view
+        virtual
+        override(Governor, GovernorPreventLateFlip)
+        returns (uint256)
+    {
+        return super.proposalDeadline(proposalId);
+    }
+
+    /// @dev Every cast path converges here; spending the per-proposal ballot nonce on each
+    ///      applied cast is what invalidates outstanding signed ballots for this proposal.
+    ///      Spent BEFORE `super._castVote` dispatches to the ruleset's external `countVote`,
+    ///      so the in-flight signature is already dead during that call; a revert unwinds
+    ///      the spend and the cast atomically either way.
+    function _castVote(uint256 proposalId, address account, uint8 support, string memory reason, bytes memory params)
+        internal
+        virtual
+        override(Governor, GovernorPreventLateFlip)
+        returns (uint256 weight)
+    {
+        // Increment-only, +1 per cast: cannot realistically overflow.
+        unchecked {
+            ++_voteNonces[proposalId][account];
+        }
+        weight = super._castVote(proposalId, account, support, reason, params);
+    }
+
+    function _tallyUpdated(uint256 proposalId) internal virtual override(Governor, GovernorPreventLateFlip) {
+        super._tallyUpdated(proposalId);
+    }
+
+    // ─────────────────────────── Batch voting ───────────────────────────
+
+    /// @notice Casts votes on several proposals in one transaction.
+    /// @dev All-or-nothing: any failing item reverts the whole batch. Duplicate ids are
+    ///      valid intra-tx re-votes, last-wins. Empty `reasons[i]`/`params[i]` entries mean
+    ///      "none". Explicit function rather than `Multicall`: the governor's payable
+    ///      surface makes Multicall the msg.value-reuse bug class.
+    function castVoteWithReasonAndParamsBatch(
+        uint256[] calldata proposalIds,
+        uint8[] calldata supportValues,
+        string[] calldata reasons,
+        bytes[] calldata params
+    ) public virtual returns (uint256[] memory weights) {
+        uint256 n = proposalIds.length;
+        if (n == 0) revert EmptyBatch();
+        if (n != supportValues.length || n != reasons.length || n != params.length) {
+            revert BatchLengthMismatch();
+        }
+
+        address voter = _msgSender();
+
+        weights = new uint256[](n);
+        for (uint256 i = 0; i < n; ++i) {
+            weights[i] = _castVote(proposalIds[i], voter, supportValues[i], reasons[i], params[i]);
+        }
+    }
+
+    // ─────────────────────────── Cancel policy ───────────────────────────
+
+    /// @dev Cancel authorization: only while the proposal is Pending or Active, and never in
+    ///      the propose block — by the proposer, or by anyone when the pinned type's
+    ///      `proposalThreshold` is nonzero and the proposer's prior-block votes fall below it.
+    ///      The propose-block bar makes the atomic propose→cancel→settle round-trip (which
+    ///      would flash-borrow away a proposal bond's capital cost) unrepresentable, and keeps
+    ///      a depth-1 reorg from changing a cancel's economic outcome.
+    function _validateCancel(uint256 proposalId, address caller) internal view virtual override returns (bool) {
+        ProposalState s = state(proposalId);
+        if (s != ProposalState.Pending && s != ProposalState.Active) return false;
+
+        // snapshot − delay = the propose block; both operands come from core storage, so the
+        // probe stays ruleset-free. `state()` above already rejected nonexistent ids.
+        TypeConfig storage config = _types[proposalType(proposalId)];
+        if (clock() == proposalSnapshot(proposalId) - config.votingDelay) return false;
+
+        address proposer = proposalProposer(proposalId);
+        if (caller == proposer) return true;
+
+        uint256 votesThreshold = config.proposalThreshold;
+        return votesThreshold > 0 && getVotes(proposer, clock() - 1) < votesThreshold;
     }
 
     // ─────────────────── Governor / GovernorTimelockControl overrides ───────────────────
@@ -418,7 +706,9 @@ contract GovernorNexus is Governor, GovernorVotes, GovernorTimelockControl {
         bytes[] memory calldatas,
         bytes32 descriptionHash
     ) internal virtual override(Governor, GovernorTimelockControl) returns (uint256) {
-        return super._cancel(targets, values, calldatas, descriptionHash);
+        uint256 proposalId = super._cancel(targets, values, calldatas, descriptionHash);
+        _canceledAt[proposalId] = clock();
+        return proposalId;
     }
 
     function _executor() internal view virtual override(Governor, GovernorTimelockControl) returns (address) {

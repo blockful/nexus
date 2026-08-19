@@ -4,18 +4,18 @@ pragma solidity ^0.8.30;
 import {IGovernor} from "@openzeppelin/contracts/governance/IGovernor.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-import {GovernorNexus} from "../src/GovernorNexus.sol";
-import {IRuleset} from "../src/IRuleset.sol";
-import {StandardRuleset} from "../src/StandardRuleset.sol";
+import {GovernorNexus} from "../../src/GovernorNexus.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
+import {StandardRuleset} from "../../src/rulesets/StandardRuleset.sol";
 import {GovernorNexusTestBase} from "./GovernorNexusTestBase.sol";
-import {Box} from "./mocks/Box.sol";
+import {Box} from "../mocks/Box.sol";
 import {
     LyingRuleset,
     ReentrantRuleset,
     RevertingRuleset,
     RevertingViewsRuleset,
     WeightInflatingRuleset
-} from "./mocks/MaliciousRulesets.sol";
+} from "../mocks/MaliciousRulesets.sol";
 
 /// @dev Supports ERC165 but NOT IRuleset — a ruleset that lies about its interface. Mirrors the
 ///      registry suite's `Mock165`; used here from the attack angle in the consolidated
@@ -27,11 +27,11 @@ contract FakeInterfaceRuleset is IERC165 {
 }
 
 /// @title GovernorNexus adversarial suite
-/// @notice Attack-first tests pinning the EXACT blast radius the spec (§8) promises: a
+/// @notice Attack-first tests pinning the EXACT blast radius the core guarantees: a
 ///         malicious/broken ruleset can break voting on ITS OWN proposals only. It must never
 ///         corrupt core lifecycle state, reach `onlyGovernance` surface, affect proposals
 ///         pinned to other types, let third parties stuff tallies, or let the registry accept
-///         junk. Rulesets are DAO-vote-gated code (trust boundary is procedural — spec D3), so
+///         junk. Rulesets are DAO-vote-gated code (the trust boundary is procedural), so
 ///         some outcomes (e.g. LyingRuleset succeeding with zero votes) are ACCEPTED risks this
 ///         suite documents rather than bugs the core prevents.
 /// @dev Reuses `GovernorNexusTestBase` (alice funds the whole supply, so any standard-quorum
@@ -157,12 +157,12 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
 
     // ═══════════════════════ LyingRuleset ═══════════════════════
 
-    /// @dev ACCEPTED RISK (spec D3): a ruleset whose outcome views always return true carries
+    /// @dev ACCEPTED RISK: a ruleset whose outcome views always return true carries
     ///      its proposal to Succeeded — and through queue/execute — with ZERO votes cast. This
     ///      is the trust model: rulesets are DAO-vote-gated code, so this is caught by process
     ///      (audit + the registration vote), not by the core. The test documents the blast
     ///      radius and pins that proposals on OTHER types are unaffected.
-    function test_lyingRuleset_succeedsAndExecutesWithZeroVotes_acceptedRiskD3() public {
+    function test_lyingRuleset_succeedsAndExecutesWithZeroVotes_acceptedRisk() public {
         LyingRuleset lyingRuleset = new LyingRuleset(address(governor));
         uint8 badType = _registerType(lyingRuleset, 0, "register lying ruleset");
 
@@ -192,7 +192,10 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
     ///      (Governor.state, OZ v5.6.1): so the proposal is queryable (Pending, then Active) up
     ///      to the deadline, and state() begins reverting only AFTER it. Queue/execute become
     ///      impossible for this proposal (both route through state()), while the governor's own
-    ///      bookkeeping views keep answering. Other types stay fully functional.
+    ///      bookkeeping views keep answering. Other types stay fully functional. Note: this test
+    ///      never casts a vote, so it doesn't exercise `GovernorPreventLateFlip`'s pre-count
+    ///      hook — see `test_revertingViewsRuleset_blocksCastVoteInsideFinalWindow` below for
+    ///      the earlier failure the late-flip mechanism introduces.
     function test_revertingViewsRuleset_stateRevertsOnlyAfterDeadline() public {
         RevertingViewsRuleset rv = new RevertingViewsRuleset(address(governor));
         uint8 badType = _registerType(rv, 0, "register reverting-views ruleset");
@@ -230,6 +233,33 @@ contract GovernorNexusAdversarialTest is GovernorNexusTestBase {
         _rollPastDeadline(victimId);
         _queueAndExecute(vt, vv, vc, vh);
         assertEq(box.value(), 55);
+        assertEq(uint8(_stateOf(victimId)), uint8(IGovernor.ProposalState.Executed));
+    }
+
+    /// @dev `GovernorPreventLateFlip._observeLateFlip` reads the same poisoned views on every
+    ///      cast inside the final `extensionWindow`, so `castVote` reverts there too — widening
+    ///      the blast radius from "post-deadline queries only" to "the final window of voting,
+    ///      plus everything after the deadline". Still contained to this one proposal type.
+    function test_revertingViewsRuleset_blocksCastVoteInsideFinalWindow() public {
+        RevertingViewsRuleset rv = new RevertingViewsRuleset(address(governor));
+        uint8 badType = _registerType(rv, 0, "register reverting-views ruleset (in-window)");
+
+        (uint256 id,,,,) = _proposeActiveBox(1, "poisoned views in-window vote", badType);
+        uint256 deadline = governor.proposalDeadline(id);
+
+        // Inside the final extensionWindow (20 blocks), still before the deadline.
+        vm.roll(deadline - 10);
+        vm.prank(alice);
+        vm.expectRevert(RevertingViewsRuleset.ViewPoisoned.selector);
+        governor.castVote(id, 1);
+
+        // Containment: a type-0 proposal votes and executes normally in the same window.
+        (uint256 victimId, address[] memory vt, uint256[] memory vv, bytes[] memory vc, bytes32 vh) =
+            _proposeActiveBox(66, "in-window victim proposal", 0);
+        _vote(victimId, alice, 1);
+        _rollPastDeadline(victimId);
+        _queueAndExecute(vt, vv, vc, vh);
+        assertEq(box.value(), 66);
         assertEq(uint8(_stateOf(victimId)), uint8(IGovernor.ProposalState.Executed));
     }
 

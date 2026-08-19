@@ -4,14 +4,14 @@ pragma solidity ^0.8.30;
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
 import {GovernorNexus} from "../../src/GovernorNexus.sol";
-import {IRuleset} from "../../src/IRuleset.sol";
+import {IRuleset} from "../../src/interfaces/IRuleset.sol";
 
 /// @title Malicious / broken ruleset mocks for the adversarial suite
 /// @notice Each concrete ruleset below embodies exactly ONE attack or failure mode against a
 ///         GovernorNexus core, so `GovernorNexus.adversarial.t.sol` can pin the blast radius
-///         the spec (§8) promises: a bad ruleset breaks voting on ITS OWN proposals only.
+///         the core guarantees: a bad ruleset breaks voting on ITS OWN proposals only.
 /// @dev All variants advertise `IRuleset` via ERC165 so they pass registration — the trust
-///      boundary is procedural (spec D3: rulesets are DAO-vote-gated code), not a runtime
+///      boundary is procedural (rulesets are DAO-vote-gated code), not a runtime
 ///      interface check, so a malicious ruleset that implements the interface WILL register.
 
 /// @dev Shared plumbing: ERC165 advertisement + the inert view surface (`quorum`,
@@ -117,8 +117,8 @@ contract RevertingRuleset is AdversarialRulesetBase {
 
 /// @notice Attack: outcome views always return `true`, recording nothing.
 /// @dev Makes its proposal Succeed after the deadline with ZERO votes cast. This is the
-///      accepted-risk consequence of D3 (rulesets are trusted DAO-approved code); the suite
-///      documents the blast radius, it is not a core bug.
+///      accepted-risk consequence of the trust model (rulesets are trusted DAO-approved
+///      code); the suite documents the blast radius, it is not a core bug.
 contract LyingRuleset is AdversarialRulesetBase {
     constructor(address governor_) AdversarialRulesetBase(governor_) {}
 
@@ -144,9 +144,11 @@ contract LyingRuleset is AdversarialRulesetBase {
 }
 
 /// @notice Attack: the outcome views (`quorumReached`/`voteSucceeded`) revert.
-/// @dev `state()` calls these only in the deadline-passed branch, so the poison surfaces only
-///      AFTER the voting deadline — the proposal is queryable (Pending/Active) up to then, then
-///      `state()` reverts, which in turn makes queue/execute impossible for that proposal only.
+/// @dev `state()` calls these only in the deadline-passed branch, so voting stays open and
+///      queryable up to the deadline, then `state()` reverts, making queue/execute impossible
+///      for that proposal only. `GovernorPreventLateFlip` also reads these views on every cast
+///      inside the final `extensionWindow`, so `castVote` itself reverts for that slice of the
+///      voting period too — the poison surfaces earlier than the deadline, not only after it.
 contract RevertingViewsRuleset is AdversarialRulesetBase {
     error ViewPoisoned();
 
@@ -170,6 +172,56 @@ contract RevertingViewsRuleset is AdversarialRulesetBase {
     /// @inheritdoc IRuleset
     function hasVoted(uint256, address) external pure returns (bool) {
         return false;
+    }
+}
+
+/// @notice Attack: outcome views behave (report a failing tally) while voting is open, then
+///         revert once `poison()` is flipped — the stateful cousin of {RevertingViewsRuleset}.
+/// @dev Purpose-built for the `_isLive` containment gap. A well-behaved final-window cast can
+///      arm the late-flip `FailingObserved` stage (the views return `false`, not revert), and
+///      only AFTER the deadline does the ruleset turn poisonous. That exact sequence is what
+///      routes a post-deadline liveness probe through `proposalDeadline → _wouldPass → ruleset`.
+///      {RevertingViewsRuleset} cannot reach it: reverting unconditionally, its final-window
+///      casts revert before any stage is armed, so the id stays at stage `None`.
+contract StatefulPoisonRuleset is AdversarialRulesetBase {
+    error ViewPoisoned();
+
+    bool public poisoned;
+
+    mapping(uint256 => mapping(address => bool)) internal _voted;
+
+    constructor(address governor_) AdversarialRulesetBase(governor_) {}
+
+    /// @dev Flip the ruleset poisonous; the test calls this only after the deadline.
+    function poison() external {
+        poisoned = true;
+    }
+
+    /// @inheritdoc IRuleset
+    function countVote(uint256 proposalId, address voter, uint8, uint256 weight, bytes calldata)
+        external
+        returns (uint256)
+    {
+        require(msg.sender == governor, "not governor");
+        _voted[proposalId][voter] = true;
+        return weight; // accepts silently; the views, not the tally, drive the scenario
+    }
+
+    /// @inheritdoc IRuleset
+    function quorumReached(uint256) external view returns (bool) {
+        if (poisoned) revert ViewPoisoned();
+        return false; // failing while open: lets a final-window cast arm FailingObserved
+    }
+
+    /// @inheritdoc IRuleset
+    function voteSucceeded(uint256) external view returns (bool) {
+        if (poisoned) revert ViewPoisoned();
+        return false;
+    }
+
+    /// @inheritdoc IRuleset
+    function hasVoted(uint256 proposalId, address voter) external view returns (bool) {
+        return _voted[proposalId][voter];
     }
 }
 

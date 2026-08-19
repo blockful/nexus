@@ -22,9 +22,19 @@ interface IRuleset is IERC165 {
     ///      counted is answered from empty-tally defaults, never a revert. That means this
     ///      can read `true` for an uncounted id whenever `quorum(0) == 0` — callers must
     ///      gate on proposal existence (the governor does via `state()`).
+    ///
+    ///      **MAY be non-monotonic.** A mutable-vote ruleset moves weight between buckets while
+    ///      voting is open, so this can flip in *both* directions before the deadline (an
+    ///      immutable-vote ruleset is monotonic — the guarantee is not part of this interface
+    ///      either way). A consumer requiring finality MUST evaluate at/near the deadline and
+    ///      MUST NOT arm one-shot state on a tally-crossing event — an attacker could cross the
+    ///      threshold early, re-vote back below it, and burn a once-only trigger before the
+    ///      crossing that matters.
     function quorumReached(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `proposalId`'s tallied votes satisfy this ruleset's pass/fail rule.
+    /// @dev MAY be non-monotonic under a mutable-vote ruleset — see `quorumReached`. Consumers
+    ///      needing finality must read it at/near the deadline, never arm one-shot state on a flip.
     function voteSucceeded(uint256 proposalId) external view returns (bool);
 
     /// @notice Whether `voter` has already cast a vote on `proposalId` under this ruleset.
@@ -32,6 +42,12 @@ interface IRuleset is IERC165 {
     ///      tally storage, so a `proposalId` this ruleset never counted reads as `false`
     ///      (empty-tally default), never as an error.
     function hasVoted(uint256 proposalId, address voter) external view returns (bool);
+
+    /// @notice The governor this ruleset is bound to — its sole authorized `countVote` caller.
+    /// @dev Read once at type registration: a governor refuses rulesets bound elsewhere, so a
+    ///      mis-wired deployment reverts at `registerType` instead of shipping a type that
+    ///      bricks on first propose/vote.
+    function governor() external view returns (address);
 
     /// Tooling/view support only — never used for outcome logic (that is `quorumReached`).
     function quorum(uint256 timepoint) external view returns (uint256);

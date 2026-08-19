@@ -13,8 +13,19 @@ library ENSParams {
     uint48 internal constant VOTING_DELAY = 1; // blocks
     uint32 internal constant VOTING_PERIOD = 45_818; // blocks (~1 week)
     uint256 internal constant PROPOSAL_THRESHOLD = 100_000e18; // 100k ENS
+    // Not read from the live governor (it has no such mechanism): per-proposer cap on
+    // concurrently live proposals.
+    uint8 internal constant MAX_ACTIVE_PROPOSALS = 2;
     // Live governor expresses quorum as 100/10000; OZ v5's default denominator is 100,
-    // so numerator 1 encodes the same 1%. Parity is asserted on quorum() output, which
-    // is denominator-independent.
+    // so numerator 1 encodes the same 1%.
     uint256 internal constant QUORUM_NUMERATOR = 1;
+
+    // Intended ENS registration values for the additional rulesets.
+    uint256 internal constant BOND_AMOUNT = 1_000e18; // 1,000 ENS
+    uint256 internal constant VETO_THRESHOLD = 500_000e18; // 500k ENS
+
+    // Late-flip extension: final-24h trigger window and 48h extension, in
+    // blocks (~12s/block), matching the block-denominated voting period above.
+    uint48 internal constant EXTENSION_WINDOW = 7200; // 24h
+    uint48 internal constant EXTENSION_DURATION = 14_400; // 48h
 }
