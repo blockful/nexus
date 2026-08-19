@@ -20,6 +20,12 @@ library ENSParams {
     // so numerator 1 encodes the same 1%.
     uint256 internal constant QUORUM_NUMERATOR = 1;
 
+    // Intended ENS registration values for the additional rulesets — not read from the
+    // live governor (it has neither mechanism): the DAO-ratified proposal bond (EP 5.15)
+    // and the optimistic ruleset's absolute veto threshold.
+    uint256 internal constant BOND_AMOUNT = 1_000e18; // 1,000 ENS
+    uint256 internal constant VETO_THRESHOLD = 500_000e18; // 500k ENS
+
     // Late-flip extension: final-24h trigger window and 48h extension, in
     // blocks (~12s/block), matching the block-denominated voting period above.
     uint48 internal constant EXTENSION_WINDOW = 7200; // 24h
