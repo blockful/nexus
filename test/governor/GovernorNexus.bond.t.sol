@@ -567,7 +567,7 @@ contract GovernorNexusBondTest is BondRulesetTestBase {
         assertEq(token.balanceOf(bob), before + BOND_AMOUNT);
     }
 
-    /// @dev LEAD-10 pin: the atomic propose→cancel(→resolve) round-trip — which would let a
+    /// @dev Pins that the atomic propose→cancel(→resolve) round-trip — which would let a
     ///      flash-borrowed bond enter and leave custody inside one transaction — is denied at
     ///      the cancel step, so the bond provably survives the propose block in custody.
     function test_cancel_sameBlockAsPropose_denied_bondStaysLocked() public {

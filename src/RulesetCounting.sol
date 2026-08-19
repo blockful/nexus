@@ -10,7 +10,7 @@ import {IRuleset} from "./interfaces/IRuleset.sol";
 /// @dev Rules (which support values exist, quorum, success, counting mode) belong to the
 ///      inheriting ruleset; this base owns only the arithmetic and the `onlyGovernor` trust
 ///      boundary. Buckets are keyed by the raw `support` value rather than a fixed
-///      Against/For/Abstain struct, so a ruleset with extra options — Bond's No+Slash —
+///      Against/For/Abstain struct, so a ruleset with extra options — Bond's AgainstAndSlash —
 ///      reuses this counting layer without a storage-layout change. Which values are legal
 ///      is the ruleset's call, via `_isValidSupport`.
 ///
@@ -133,13 +133,13 @@ abstract contract RulesetCounting is IRuleset {
     }
 
     /// @dev The support values this ruleset accepts. Standard/Optimistic use the three Bravo
-    ///      options; Bond adds No+Slash. Declared `pure` so an override physically cannot read
+    ///      options; Bond adds AgainstAndSlash. Declared `pure` so an override physically cannot read
     ///      storage — a stateful check would make `tally`/`countVote` state-dependent and could
     ///      break the unknown-id no-revert contract.
     ///
     ///      **Obligation:** every support value an override accepts here MUST be accounted for in
     ///      that ruleset's `quorumReached`/`voteSucceeded`. Weight cast for an accepted-but-unread
     ///      bucket is conserved in storage yet silently excluded from the outcome — no revert, no
-    ///      test failure unless the exact case is written. (Bond's No+Slash is the live example.)
+    ///      test failure unless the exact case is written. (Bond's AgainstAndSlash is the live example.)
     function _isValidSupport(uint8 support) internal pure virtual returns (bool);
 }

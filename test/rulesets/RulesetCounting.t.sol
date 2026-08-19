@@ -45,7 +45,7 @@ contract CountingHarness is RulesetCounting {
     }
 }
 
-/// @dev A ruleset with a FOURTH option, standing in for the Bond ruleset (No+Slash).
+/// @dev A ruleset with a FOURTH option, standing in for the Bond ruleset (AgainstAndSlash).
 ///      The base must count it without a storage-layout change — otherwise "the counting layer
 ///      every ruleset shares" is only true for the three-bucket rulesets.
 contract FourOptionHarness is RulesetCounting {
@@ -312,22 +312,22 @@ contract RulesetCountingTest is Test {
     // ─────────────────────────── Extra support options (Bond) ───────────────────────────
 
     /// @dev The base must carry a ruleset that defines more than the three Bravo options: Bond
-    ///      adds No+Slash as support=3. A re-vote *into* the extra bucket
+    ///      adds AgainstAndSlash as support=3. A re-vote *into* the extra bucket
     ///      must conserve the tally exactly as the three-option case does.
     function test_extraSupportOption_countsAndConservesOnRevote() public {
         FourOptionHarness bond = new FourOptionHarness(governor);
-        uint8 noAndSlash = 3;
+        uint8 againstAndSlash = 3;
 
         vm.prank(governor);
         bond.countVote(PROPOSAL_ID, alice, FOR, 600e18, "");
         vm.prank(governor);
-        bond.countVote(PROPOSAL_ID, alice, noAndSlash, 600e18, ""); // re-vote into the 4th bucket
+        bond.countVote(PROPOSAL_ID, alice, againstAndSlash, 600e18, ""); // re-vote into the 4th bucket
 
         assertEq(bond.tally(PROPOSAL_ID, FOR), 0, "the For bucket was debited");
-        assertEq(bond.tally(PROPOSAL_ID, noAndSlash), 600e18, "the extra bucket holds the standing vote");
+        assertEq(bond.tally(PROPOSAL_ID, againstAndSlash), 600e18, "the extra bucket holds the standing vote");
 
         (, uint8 support,) = bond.voteReceipt(PROPOSAL_ID, alice);
-        assertEq(support, noAndSlash);
+        assertEq(support, againstAndSlash);
     }
 
     /// @dev Each ruleset still owns which options it accepts: the three-option harness must
